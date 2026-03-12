@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FTC Simulator — DECODE 2025-26</title>
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <!-- Landing Page -->
+  <div id="landing">
+    <div class="landing-container">
+      <div class="landing-header">
+        <h1>FTC Simulator</h1>
+        <p class="landing-subtitle">DECODE 2025-26</p>
+      </div>
+
+      <div class="upload-section">
+        <h2>Load Your OpMode</h2>
+        <p class="upload-desc">Upload your FTC Robot Controller code. Supports Java (FTC SDK + FTCLib), Gradle projects, JS, and TS.</p>
+
+        <div class="upload-options">
+          <!-- File Upload -->
+          <div class="upload-card" id="upload-card-file">
+            <div class="upload-icon">&#128193;</div>
+            <h3>Upload Files</h3>
+            <p>Select a single file or multiple Java/JS/TS files</p>
+            <button id="landing-file-btn" class="upload-btn">Choose File(s)</button>
+            <input type="file" id="landing-file-input" accept=".js,.ts,.java,.gradle" multiple style="display:none" />
+            <div class="upload-divider">or</div>
+            <button id="landing-folder-btn" class="upload-btn upload-btn-secondary">Upload Project Folder</button>
+            <input type="file" id="landing-folder-input" webkitdirectory directory style="display:none" />
+            <div id="file-selected" class="file-selected hidden"></div>
+          </div>
+
+          <!-- GitHub Import -->
+          <div class="upload-card" id="upload-card-github">
+            <div class="upload-icon">&#128279;</div>
+            <h3>Import from GitHub</h3>
+            <p>Paste a file URL or TeamCode folder link from GitHub</p>
+            <input type="text" id="github-url-input" class="github-input" placeholder="https://github.com/user/repo/tree/main/TeamCode/src" />
+            <button id="landing-github-btn" class="upload-btn">Fetch Code</button>
+            <div id="github-status" class="file-selected hidden"></div>
+          </div>
+        </div>
+
+        <div class="robot-model-toggle" style="margin-top:20px;text-align:center;">
+          <label style="color:#ccc;font-family:monospace;font-size:14px;cursor:pointer;display:inline-flex;align-items:center;gap:8px;">
+            <input type="checkbox" id="use-custom-model" style="width:18px;height:18px;cursor:pointer;" />
+            Use custom robot model (Robot.gltf — may be slow for large files)
+          </label>
+        </div>
+
+        <div class="landing-actions">
+          <button id="landing-launch" class="launch-btn" disabled>Launch Simulator</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Simulator (hidden until launched) -->
+  <div id="app" class="hidden">
+    <canvas id="simulator-canvas"></canvas>
+    <div id="ui-overlay">
+      <div id="hud">
+        <div id="timer">2:30</div>
+        <div id="score-display">
+          <span class="alliance red">RED: <span id="red-score">0</span></span>
+          <span class="alliance blue">BLUE: <span id="blue-score">0</span></span>
+        </div>
+        <div id="match-phase">TELEOP</div>
+      </div>
+      <div id="controls-panel" class="panel hidden">
+        <h3>Controls</h3>
+        <div class="control-group">
+          <h4>Keyboard</h4>
+          <p>WASD — Drive</p>
+          <p>Arrow Keys — Turret</p>
+          <p>Q/E — Intake In/Out</p>
+          <p>Space — Shoot</p>
+          <p>Shift — Boost</p>
+          <p>R — Reset Robot</p>
+          <p>F — Toggle Freecam</p>
+          <p>1/2/3 — Camera Presets</p>
+        </div>
+        <div class="control-group">
+          <h4>Gamepad</h4>
+          <p>Left Stick — Drive</p>
+          <p>Right Stick — Turn/Turret</p>
+          <p>LB/RB — Intake</p>
+          <p>A — Shoot</p>
+          <p>B — Boost</p>
+        </div>
+      </div>
+      <div id="code-status" class="panel hidden">
+        <h3>OpMode</h3>
+        <div id="code-output"></div>
+        <div class="btn-row">
+          <button id="btn-stop-code">Stop OpMode</button>
+        </div>
+      </div>
+      <div id="toolbar">
+        <button id="btn-play" title="Start Match">&#9654;</button>
+        <button id="btn-pause" title="Pause">&#10074;&#10074;</button>
+        <button id="btn-reset" title="Reset Field">&#8634;</button>
+        <button id="btn-controls" title="Controls">&#9881;</button>
+        <button id="btn-freecam" title="Toggle Freecam">&#128247;</button>
+      </div>
+      <div id="gamepad-indicator" class="hidden">
+        <span class="dot"></span> Gamepad Connected
+      </div>
+      <div id="telemetry">
+        <h4>Telemetry</h4>
+        <pre id="telemetry-data"></pre>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
