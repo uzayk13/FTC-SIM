@@ -447,10 +447,7 @@ export class Engine {
     this.composer.addPass(this.bloomPass);
 
     // SMAA — high quality anti-aliasing (replaces native MSAA)
-    const smaaPass = new SMAAPass(
-      size.x * pixelRatio,
-      size.y * pixelRatio
-    );
+    const smaaPass = new SMAAPass();
     this.composer.addPass(smaaPass);
 
     // Color grading + vignette

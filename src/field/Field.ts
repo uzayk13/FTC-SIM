@@ -141,35 +141,37 @@ export class Field {
     panelShape.lineTo(-goalW / 2, totalH);
     panelShape.closePath();
     const panelGeo = new THREE.ExtrudeGeometry(panelShape, { depth: 0.02, bevelEnabled: false });
-    const panelMat = new THREE.MeshStandardMaterial({ color, roughness: 0.4, metalness: 0.1 });
+    const panelMat = new THREE.MeshPhysicalMaterial({ color, roughness: 0.3, metalness: 0.15, clearcoat: 0.4, clearcoatRoughness: 0.3, envMapIntensity: 0.6 });
     const panel = new THREE.Mesh(panelGeo, panelMat);
     panel.position.set(0, 0, 0);
+    panel.castShadow = true;
     g.add(panel);
 
     // AprilTag Logo
-    const tag = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 0.2), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8 }));
+    const tag = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 0.2), new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.6, metalness: 0.0 }));
     tag.position.set(0, lipH + 0.1, 0.025);
     g.add(tag);
 
     // Ramp along the left wall
     const rampW = 8 * IN;
     const rampL = 40 * IN;
-    const ramp = new THREE.Mesh(new THREE.BoxGeometry(rampW, 0.02, rampL), new THREE.MeshStandardMaterial({ color: 0xaaaaaa, metalness: 0.5, transparent: true, opacity: 0.8 }));
+    const ramp = new THREE.Mesh(new THREE.BoxGeometry(rampW, 0.02, rampL), new THREE.MeshPhysicalMaterial({ color: 0xaaaaaa, metalness: 0.7, roughness: 0.2, clearcoat: 0.5, transparent: true, opacity: 0.85 }));
     ramp.position.set(-goalW / 2 + rampW / 2, lipH * 0.4, rampL / 2 + 0.1);
     ramp.rotation.x = -Math.PI / 8; // sloping down towards front
     g.add(ramp);
 
     // Ramp side rails (aluminum)
-    const railMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.8, roughness: 0.2 });
+    const railMat = new THREE.MeshPhysicalMaterial({ color: 0xdddddd, metalness: 0.9, roughness: 0.15, clearcoat: 0.6, clearcoatRoughness: 0.2, envMapIntensity: 0.8 });
     for (const sx of [-rampW / 2, rampW / 2]) {
-      const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, rampL, 8), railMat);
+      const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, rampL, 12), railMat);
       rail.position.set(-goalW / 2 + rampW / 2 + sx, lipH * 0.4 + 0.05, rampL / 2 + 0.1);
       rail.rotation.x = -Math.PI / 8;
+      rail.castShadow = true;
       g.add(rail);
     }
 
     // Aluminum support legs for ramp
-    const leg1 = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, lipH * 0.2, 8), railMat);
+    const leg1 = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, lipH * 0.2, 12), railMat);
     leg1.position.set(-goalW / 2 + rampW / 2 - 0.05, lipH * 0.1, rampL - 0.1);
     g.add(leg1);
     const leg2 = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, lipH * 0.2, 8), railMat);
@@ -205,38 +207,40 @@ export class Field {
     panelShape.lineTo(goalW / 2, totalH);
     panelShape.closePath();
     const panelGeo = new THREE.ExtrudeGeometry(panelShape, { depth: 0.02, bevelEnabled: false });
-    const panelMat = new THREE.MeshStandardMaterial({ color, roughness: 0.4, metalness: 0.1 });
+    const panelMat = new THREE.MeshPhysicalMaterial({ color, roughness: 0.3, metalness: 0.15, clearcoat: 0.4, clearcoatRoughness: 0.3, envMapIntensity: 0.6 });
     const panel = new THREE.Mesh(panelGeo, panelMat);
     panel.position.set(0, 0, 0);
+    panel.castShadow = true;
     g.add(panel);
 
     // AprilTag Logo
-    const tag = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 0.2), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8 }));
+    const tag = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 0.2), new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.6, metalness: 0.0 }));
     tag.position.set(0, lipH + 0.1, 0.025);
     g.add(tag);
 
     // Ramp along the right wall
     const rampW = 8 * IN;
     const rampL = 40 * IN;
-    const ramp = new THREE.Mesh(new THREE.BoxGeometry(rampW, 0.02, rampL), new THREE.MeshStandardMaterial({ color: 0xaaaaaa, metalness: 0.5, transparent: true, opacity: 0.8 }));
+    const ramp = new THREE.Mesh(new THREE.BoxGeometry(rampW, 0.02, rampL), new THREE.MeshPhysicalMaterial({ color: 0xaaaaaa, metalness: 0.7, roughness: 0.2, clearcoat: 0.5, transparent: true, opacity: 0.85 }));
     ramp.position.set(goalW / 2 - rampW / 2, lipH * 0.4, rampL / 2 + 0.1);
     ramp.rotation.x = -Math.PI / 8; // sloping down
     g.add(ramp);
 
     // Ramp side rails
-    const railMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.8, roughness: 0.2 });
+    const railMat = new THREE.MeshPhysicalMaterial({ color: 0xdddddd, metalness: 0.9, roughness: 0.15, clearcoat: 0.6, clearcoatRoughness: 0.2, envMapIntensity: 0.8 });
     for (const sx of [-rampW / 2, rampW / 2]) {
-      const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, rampL, 8), railMat);
+      const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, rampL, 12), railMat);
       rail.position.set(goalW / 2 - rampW / 2 + sx, lipH * 0.4 + 0.05, rampL / 2 + 0.1);
       rail.rotation.x = -Math.PI / 8;
+      rail.castShadow = true;
       g.add(rail);
     }
 
     // Aluminum support legs
-    const leg1 = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, lipH * 0.2, 8), railMat);
+    const leg1 = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, lipH * 0.2, 12), railMat);
     leg1.position.set(goalW / 2 - rampW / 2 - 0.05, lipH * 0.1, rampL - 0.1);
     g.add(leg1);
-    const leg2 = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, lipH * 0.2, 8), railMat);
+    const leg2 = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, lipH * 0.2, 12), railMat);
     leg2.position.set(goalW / 2 - rampW / 2 + 0.05, lipH * 0.1, rampL - 0.1);
     g.add(leg2);
 
@@ -265,7 +269,7 @@ export class Field {
     tri.closePath();
 
     const geo = new THREE.ExtrudeGeometry(tri, { depth: h, bevelEnabled: false });
-    const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8, metalness: 0.1 }); // White obelisk
+    const mat = new THREE.MeshPhysicalMaterial({ color: 0xf0f0f0, roughness: 0.4, metalness: 0.05, clearcoat: 0.6, clearcoatRoughness: 0.3, envMapIntensity: 0.5 }); // White obelisk
     const mesh = new THREE.Mesh(geo, mat);
     // Centered behind the back wall glass
     mesh.position.set(0, 0, -HALF - 0.15);

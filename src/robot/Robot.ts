@@ -81,10 +81,13 @@ export class Robot {
 
   telemetry: Record<string, string | number> = {};
 
-  constructor(scene: THREE.Scene, world: CANNON.World, useCustomModel = false) {
+  envMap: THREE.Texture | null;
+
+  constructor(scene: THREE.Scene, world: CANNON.World, useCustomModel = false, envMap: THREE.Texture | null = null) {
     this.scene = scene;
     this.world = world;
     this.useCustomModel = useCustomModel;
+    this.envMap = envMap;
     this.build();
   }
 
@@ -202,11 +205,13 @@ export class Robot {
 
   // ─── FRAME: goBILDA U-Channel rails ───
   private buildFrame() {
-    const chanMat = new THREE.MeshStandardMaterial({
-      color: COL_CHANNEL, roughness: 0.35, metalness: 0.7,
+    const chanMat = new THREE.MeshPhysicalMaterial({
+      color: COL_CHANNEL, roughness: 0.25, metalness: 0.85,
+      clearcoat: 0.4, clearcoatRoughness: 0.3, envMapIntensity: 0.7,
     });
-    const plateMat = new THREE.MeshStandardMaterial({
-      color: COL_PLATE, roughness: 0.5, metalness: 0.5,
+    const plateMat = new THREE.MeshPhysicalMaterial({
+      color: COL_PLATE, roughness: 0.35, metalness: 0.7,
+      clearcoat: 0.3, clearcoatRoughness: 0.4, envMapIntensity: 0.5,
     });
 
     const makeChannel = (length: number, axis: 'x' | 'z'): THREE.Group => {
@@ -280,14 +285,17 @@ export class Robot {
 
   // ─── WHEELS: 96mm Mecanum with rollers ───
   private buildWheels() {
-    const hubMat = new THREE.MeshStandardMaterial({
-      color: COL_WHEEL, roughness: 0.7, metalness: 0.4,
+    const hubMat = new THREE.MeshPhysicalMaterial({
+      color: COL_WHEEL, roughness: 0.5, metalness: 0.6,
+      clearcoat: 0.2, envMapIntensity: 0.4,
     });
-    const rollerMat = new THREE.MeshStandardMaterial({
-      color: COL_ROLLER, roughness: 0.6, metalness: 0.2,
+    const rollerMat = new THREE.MeshPhysicalMaterial({
+      color: COL_ROLLER, roughness: 0.4, metalness: 0.3,
+      clearcoat: 0.15,
     });
-    const plateMat = new THREE.MeshStandardMaterial({
-      color: 0x333333, roughness: 0.3, metalness: 0.8,
+    const plateMat = new THREE.MeshPhysicalMaterial({
+      color: 0x333333, roughness: 0.2, metalness: 0.9,
+      clearcoat: 0.5, clearcoatRoughness: 0.2, envMapIntensity: 0.8,
     });
 
     const positions: [number, number, number, boolean][] = [
@@ -352,14 +360,17 @@ export class Robot {
 
   // ─── MOTORS: goBILDA 5203 Yellow Jacket ───
   private buildMotors() {
-    const motorBodyMat = new THREE.MeshStandardMaterial({
-      color: COL_MOTOR, roughness: 0.4, metalness: 0.3,
+    const motorBodyMat = new THREE.MeshPhysicalMaterial({
+      color: COL_MOTOR, roughness: 0.3, metalness: 0.4,
+      clearcoat: 0.6, clearcoatRoughness: 0.2, envMapIntensity: 0.6,
     });
-    const motorEndMat = new THREE.MeshStandardMaterial({
-      color: 0x222222, roughness: 0.5, metalness: 0.6,
+    const motorEndMat = new THREE.MeshPhysicalMaterial({
+      color: 0x222222, roughness: 0.35, metalness: 0.7,
+      clearcoat: 0.3, envMapIntensity: 0.5,
     });
-    const gearMat = new THREE.MeshStandardMaterial({
-      color: 0x888888, roughness: 0.2, metalness: 0.9,
+    const gearMat = new THREE.MeshPhysicalMaterial({
+      color: 0x999999, roughness: 0.1, metalness: 0.95,
+      clearcoat: 0.7, clearcoatRoughness: 0.1, envMapIntensity: 1.0,
     });
 
     const motorPositions: [number, number, number, number][] = [
@@ -404,7 +415,7 @@ export class Robot {
     const hubGroup = new THREE.Group();
     const hubBody = new THREE.Mesh(
       new THREE.BoxGeometry(0.110, 0.030, 0.075),
-      new THREE.MeshStandardMaterial({ color: COL_HUB, roughness: 0.6, metalness: 0.3 })
+      new THREE.MeshPhysicalMaterial({ color: COL_HUB, roughness: 0.4, metalness: 0.5, clearcoat: 0.3, envMapIntensity: 0.4 })
     );
     hubBody.castShadow = true;
     hubGroup.add(hubBody);
@@ -412,7 +423,7 @@ export class Robot {
     const hubLed = new THREE.Mesh(
       new THREE.BoxGeometry(0.08, 0.004, 0.003),
       new THREE.MeshStandardMaterial({
-        color: COL_HUB_LED, emissive: COL_HUB_LED, emissiveIntensity: 1.5,
+        color: COL_HUB_LED, emissive: COL_HUB_LED, emissiveIntensity: 3.0,
       })
     );
     hubLed.position.set(0, 0.017, -0.035);
@@ -462,13 +473,13 @@ export class Robot {
 
     const housing = new THREE.Mesh(
       new THREE.BoxGeometry(intakeW, 0.025, 0.05),
-      new THREE.MeshStandardMaterial({ color: COL_CHANNEL, roughness: 0.4, metalness: 0.5 })
+      new THREE.MeshPhysicalMaterial({ color: COL_CHANNEL, roughness: 0.25, metalness: 0.7, clearcoat: 0.3, envMapIntensity: 0.5 })
     );
     housing.castShadow = true;
     this.intakeMesh.add(housing);
 
-    const rollerMat = new THREE.MeshStandardMaterial({
-      color: COL_INTAKE, roughness: 0.5, metalness: 0.2,
+    const rollerMat = new THREE.MeshPhysicalMaterial({
+      color: COL_INTAKE, roughness: 0.35, metalness: 0.3, clearcoat: 0.2,
     });
     const rollerGeo = new THREE.CylinderGeometry(rollerR, rollerR, intakeW, 12);
 
@@ -500,8 +511,9 @@ export class Robot {
   private buildLinearSlide() {
     this.slideMesh = new THREE.Group();
 
-    const slideMat = new THREE.MeshStandardMaterial({
-      color: COL_SLIDE, roughness: 0.25, metalness: 0.8,
+    const slideMat = new THREE.MeshPhysicalMaterial({
+      color: COL_SLIDE, roughness: 0.15, metalness: 0.9,
+      clearcoat: 0.5, clearcoatRoughness: 0.15, envMapIntensity: 0.8,
     });
 
     const railGeo = new THREE.BoxGeometry(0.025, SLIDE_HEIGHT, 0.025);
@@ -551,8 +563,8 @@ export class Robot {
     this.shooterMesh = new THREE.Group();
 
     const pivotBase = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.015, 0.015, 0.08, 12),
-      new THREE.MeshStandardMaterial({ color: COL_SLIDE, roughness: 0.3, metalness: 0.7 })
+      new THREE.CylinderGeometry(0.015, 0.015, 0.08, 16),
+      new THREE.MeshPhysicalMaterial({ color: COL_SLIDE, roughness: 0.15, metalness: 0.9, clearcoat: 0.5, envMapIntensity: 0.7 })
     );
     pivotBase.rotation.z = Math.PI / 2;
     pivotBase.castShadow = true;
@@ -560,7 +572,7 @@ export class Robot {
 
     const arm = new THREE.Mesh(
       new THREE.BoxGeometry(0.015, 0.12, 0.015),
-      new THREE.MeshStandardMaterial({ color: COL_CHANNEL, roughness: 0.3, metalness: 0.6 })
+      new THREE.MeshPhysicalMaterial({ color: COL_CHANNEL, roughness: 0.2, metalness: 0.8, clearcoat: 0.4, envMapIntensity: 0.6 })
     );
     arm.position.set(0, 0.06, 0);
     arm.castShadow = true;
@@ -568,7 +580,7 @@ export class Robot {
 
     const clawBase = new THREE.Mesh(
       new THREE.BoxGeometry(0.06, 0.015, 0.03),
-      new THREE.MeshStandardMaterial({ color: COL_CLAW, roughness: 0.3, metalness: 0.7 })
+      new THREE.MeshPhysicalMaterial({ color: COL_CLAW, roughness: 0.2, metalness: 0.8, clearcoat: 0.5, envMapIntensity: 0.7 })
     );
     clawBase.position.set(0, 0.125, 0);
     clawBase.castShadow = true;
@@ -577,7 +589,7 @@ export class Robot {
     for (const side of [-1, 1]) {
       const finger = new THREE.Mesh(
         new THREE.BoxGeometry(0.005, 0.04, 0.025),
-        new THREE.MeshStandardMaterial({ color: COL_CLAW, roughness: 0.3, metalness: 0.7 })
+        new THREE.MeshPhysicalMaterial({ color: COL_CLAW, roughness: 0.2, metalness: 0.8, clearcoat: 0.4, envMapIntensity: 0.6 })
       );
       finger.position.set(side * 0.025, 0.145, 0);
       finger.castShadow = true;
@@ -599,8 +611,8 @@ export class Robot {
     this.shooterMesh.add(servo);
 
     const launcher = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.01, 0.012, 0.06, 8),
-      new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.2, metalness: 0.8 })
+      new THREE.CylinderGeometry(0.01, 0.012, 0.06, 12),
+      new THREE.MeshPhysicalMaterial({ color: 0x555555, roughness: 0.1, metalness: 0.95, clearcoat: 0.6, envMapIntensity: 0.8 })
     );
     launcher.position.set(0, 0.155, -0.035);
     launcher.rotation.x = Math.PI / 4;
@@ -608,9 +620,9 @@ export class Robot {
     this.shooterMesh.add(launcher);
 
     const tipGlow = new THREE.Mesh(
-      new THREE.SphereGeometry(0.012, 8, 8),
+      new THREE.SphereGeometry(0.012, 16, 16),
       new THREE.MeshStandardMaterial({
-        color: 0xff4400, emissive: 0xff4400, emissiveIntensity: 0.5,
+        color: 0xff4400, emissive: 0xff4400, emissiveIntensity: 2.5,
       })
     );
     tipGlow.position.set(0, 0.175, -0.055);
@@ -745,10 +757,12 @@ export class Robot {
     const isPurple = Math.random() > 0.33;
     const hexColor = isPurple ? 0x8833aa : 0x33aa44;
 
-    const geo = new THREE.SphereGeometry(radius, 16, 16);
-    const mat = new THREE.MeshStandardMaterial({
-      color: hexColor, emissive: hexColor, emissiveIntensity: 0.3,
-      roughness: 0.25, metalness: 0.05,
+    const geo = new THREE.SphereGeometry(radius, 32, 32);
+    const mat = new THREE.MeshPhysicalMaterial({
+      color: hexColor, emissive: hexColor, emissiveIntensity: 0.5,
+      roughness: 0.15, metalness: 0.05,
+      clearcoat: 0.8, clearcoatRoughness: 0.1,
+      envMapIntensity: 0.7,
     });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.castShadow = true;

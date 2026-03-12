@@ -23,12 +23,14 @@ export class GamePieces {
   scene: THREE.Scene;
   world: CANNON.World;
   pieces: Artifact[] = [];
+  envMap: THREE.Texture | null;
 
   private artifactMaterial = new CANNON.Material('artifact');
 
-  constructor(scene: THREE.Scene, world: CANNON.World) {
+  constructor(scene: THREE.Scene, world: CANNON.World, envMap: THREE.Texture | null = null) {
     this.scene = scene;
     this.world = world;
+    this.envMap = envMap;
     const contactMat = new CANNON.ContactMaterial(
       this.artifactMaterial,
       this.artifactMaterial,
@@ -90,9 +92,19 @@ export class GamePieces {
 
   private spawn(x: number, y: number, z: number, color: 'green' | 'purple') {
     const hexColor = color === 'green' ? GREEN : PURPLE;
-    const geo = new THREE.SphereGeometry(ARTIFACT_RADIUS, 16, 16);
-    const mat = new THREE.MeshStandardMaterial({
-      color: hexColor, roughness: 0.2, metalness: 0.1, emissive: hexColor, emissiveIntensity: 0.1
+    const geo = new THREE.SphereGeometry(ARTIFACT_RADIUS, 32, 32);
+    const mat = new THREE.MeshPhysicalMaterial({
+      color: hexColor,
+      roughness: 0.15,
+      metalness: 0.05,
+      emissive: hexColor,
+      emissiveIntensity: 0.15,
+      clearcoat: 0.8,
+      clearcoatRoughness: 0.1,
+      envMapIntensity: 0.8,
+      sheen: 0.5,
+      sheenColor: new THREE.Color(hexColor).multiplyScalar(1.5),
+      sheenRoughness: 0.3,
     });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(x, y, z);
