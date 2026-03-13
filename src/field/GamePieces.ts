@@ -98,7 +98,7 @@ export class GamePieces {
       roughness: 0.15,
       metalness: 0.05,
       emissive: hexColor,
-      emissiveIntensity: 0.15,
+      emissiveIntensity: 0.05,
       clearcoat: 0.8,
       clearcoatRoughness: 0.1,
       envMapIntensity: 0.8,

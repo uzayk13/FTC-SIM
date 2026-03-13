@@ -423,7 +423,7 @@ export class Robot {
     const hubLed = new THREE.Mesh(
       new THREE.BoxGeometry(0.08, 0.004, 0.003),
       new THREE.MeshStandardMaterial({
-        color: COL_HUB_LED, emissive: COL_HUB_LED, emissiveIntensity: 3.0,
+        color: COL_HUB_LED, emissive: COL_HUB_LED, emissiveIntensity: 1.0,
       })
     );
     hubLed.position.set(0, 0.017, -0.035);
@@ -457,7 +457,7 @@ export class Robot {
     const pwrSwitch = new THREE.Mesh(
       new THREE.CylinderGeometry(0.005, 0.005, 0.005, 8),
       new THREE.MeshStandardMaterial({
-        color: 0xff2222, emissive: 0xff2222, emissiveIntensity: 0.4,
+        color: 0xff2222, emissive: 0xff2222, emissiveIntensity: 0.3,
       })
     );
     pwrSwitch.position.set(FRAME_W / 2 - CHAN_SIZE - 0.01, CHAN_SIZE / 2 + 0.005, -0.12);
@@ -622,7 +622,7 @@ export class Robot {
     const tipGlow = new THREE.Mesh(
       new THREE.SphereGeometry(0.012, 16, 16),
       new THREE.MeshStandardMaterial({
-        color: 0xff4400, emissive: 0xff4400, emissiveIntensity: 2.5,
+        color: 0xff4400, emissive: 0xff4400, emissiveIntensity: 0.8,
       })
     );
     tipGlow.position.set(0, 0.175, -0.055);
@@ -759,7 +759,7 @@ export class Robot {
 
     const geo = new THREE.SphereGeometry(radius, 32, 32);
     const mat = new THREE.MeshPhysicalMaterial({
-      color: hexColor, emissive: hexColor, emissiveIntensity: 0.5,
+      color: hexColor, emissive: hexColor, emissiveIntensity: 0.15,
       roughness: 0.15, metalness: 0.05,
       clearcoat: 0.8, clearcoatRoughness: 0.1,
       envMapIntensity: 0.7,
