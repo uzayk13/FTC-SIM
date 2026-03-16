@@ -10,8 +10,8 @@ export class CameraController {
 
   // Follow cam
   followDistance = 2.5;
-  followHeight = 1.8;
-  followAngle = 0;
+  followAngle = Math.PI;
+  followPitch = 0.6;        // elevation angle (0 = level, π/2 = directly above)
   followSmoothing = 5;
 
   // Freecam
@@ -67,7 +67,7 @@ export class CameraController {
     };
     this.onWheel = (e: WheelEvent) => {
       if (this.mode === 'follow') {
-        this.followDistance = Math.max(1, Math.min(10, this.followDistance + e.deltaY * 0.003));
+        this.followDistance = Math.max(0.2, Math.min(10, this.followDistance + e.deltaY * 0.003));
       }
     };
     this.onContextMenu = (e: Event) => e.preventDefault();
@@ -85,8 +85,9 @@ export class CameraController {
     if (this.mode === 'freecam') {
       this.mode = 'follow';
     } else {
-      this.freecamPos.copy(this.camera.position);
-      this.freecamEuler.setFromQuaternion(this.camera.quaternion, 'YXZ');
+      const robotPos = this.robot.getPosition();
+      this.freecamPos.set(robotPos.x, robotPos.y + 3, robotPos.z + 3);
+      this.freecamEuler.set(-0.7, 0, 0, 'YXZ');
       this.mode = 'freecam';
     }
   }
@@ -104,7 +105,7 @@ export class CameraController {
 
     switch (this.mode) {
       case 'follow':
-        this.updateFollow(dt, dx);
+        this.updateFollow(dt, dx, dy);
         break;
       case 'freecam':
         this.updateFreecam(dt, dx, dy);
@@ -118,17 +119,20 @@ export class CameraController {
     }
   }
 
-  private updateFollow(dt: number, mouseDx: number) {
+  private updateFollow(dt: number, mouseDx: number, mouseDy: number) {
     const robotPos = this.robot.getPosition();
 
-    // Mouse orbits around robot
+    // Mouse orbits around robot on a sphere
     if (this.mouseDown) {
       this.followAngle -= mouseDx * this.sensitivity * 2;
+      this.followPitch = Math.max(0.05, Math.min(Math.PI / 2 - 0.05, this.followPitch + mouseDy * this.sensitivity * 2));
     }
 
-    const targetX = robotPos.x + Math.sin(this.followAngle) * this.followDistance;
-    const targetZ = robotPos.z + Math.cos(this.followAngle) * this.followDistance;
-    const targetY = robotPos.y + this.followHeight;
+    const cosP = Math.cos(this.followPitch);
+    const sinP = Math.sin(this.followPitch);
+    const targetX = robotPos.x + Math.sin(this.followAngle) * cosP * this.followDistance;
+    const targetZ = robotPos.z + Math.cos(this.followAngle) * cosP * this.followDistance;
+    const targetY = robotPos.y + sinP * this.followDistance;
 
     const t = 1 - Math.exp(-this.followSmoothing * dt);
     this.camera.position.lerp(new THREE.Vector3(targetX, targetY, targetZ), t);

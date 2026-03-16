@@ -42,6 +42,17 @@ export class UIManager {
       this.controlsPanel.classList.toggle('hidden');
     });
 
+    document.getElementById('btn-close-controls')?.addEventListener('click', () => {
+      this.controlsPanel.classList.add('hidden');
+    });
+
+    window.addEventListener('keydown', (e) => {
+      if ((e.target as HTMLElement)?.tagName === 'TEXTAREA' || (e.target as HTMLElement)?.tagName === 'INPUT') return;
+      if (e.code === 'KeyH') {
+        this.controlsPanel.classList.toggle('hidden');
+      }
+    });
+
     document.getElementById('btn-freecam')?.addEventListener('click', () => {
       this.engine.cameraController.toggleFreecam();
     });

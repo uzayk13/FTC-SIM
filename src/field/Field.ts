@@ -2,34 +2,62 @@ import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { GamePieces } from './GamePieces';
 
-// DECODE 2025-26 field — fully procedural geometry matching Field.stl
-const FIELD_SIZE = 3.6576;
-const HALF = FIELD_SIZE / 2;
-const WALL_HEIGHT = 0.325;
-const WALL_THICKNESS = 0.05;
+// ══════════════════════════════════════════════════════════════
+// DECODE 2025-26 — FTC Playing Field
+// 144 × 144 in (3.6576 m) interior
+// Front wall (audience) = -Z, Back wall (goals) = +Z
+// Left wall = -X (blue side), Right wall = +X (red side)
+// ══════════════════════════════════════════════════════════════
 
-// Scale factor: STL field walls at ±1.8 → game coords ±HALF
-const S = HALF / 1.8;
+// ── Dimensions (metres) ──
+const IN = 0.0254;
+const FIELD_IN = 144;
+const FIELD = FIELD_IN * IN;             // 3.6576 m
+const HALF  = FIELD / 2;                 // 1.8288 m
+const TILE  = 24 * IN;                   // 0.6096 m
 
-// Obelisk dimensions
-const OBELISK_BASE = 0.12;
-const OBELISK_TOP = 0.06;
-const OBELISK_HEIGHT = 0.60;
+const WALL_H = 12 * IN;
+const WALL_T = 2 * IN;
 
-// Scoring zone
-const ZONE_SIZE = 0.50;
+// Goals
+const GOAL_W = 27 * IN;
+const GOAL_D = 27 * IN;
+const GOAL_H = 54 * IN;
+const GOAL_LIP_H = 38.75 * IN;
+// const GOAL_BACKBOARD_H = 15 * IN;  // will use when backboard is added
+const GOAL_WALL_T = 1 * IN;
 
-// Ascent structure (from STL measurements, scaled)
-const ASCENT_LOW_BAR_Y = 0.45 * S;
-const ASCENT_HIGH_BAR_Y = 0.73 * S;
-const ASCENT_POST_HEIGHT = 1.37 * S;
-const ASCENT_BAR_RADIUS = 0.02;
-const ASCENT_INNER_X = 1.6 * S;     // inner post X positions
-const ASCENT_FRONT_Z = 1.0 * S;     // front edge of ascent zone
-const ASCENT_BACK_Z = HALF;         // back edge = field wall
+// Classifier / Ramp
+const RAMP_LENGTH = 3 * TILE;            // 72 inches from back wall
+const RAMP_W = 8 * IN;
+const RAMP_RAIL_H = 6 * IN;
 
-// Inner divider walls
-const DIVIDER_X = 1.3 * S;
+// Loading zones
+const LOAD_SIZE = 23 * IN;
+
+// Base zones
+const BASE_SIZE = 18 * IN;
+
+// Secret tunnels
+const TUNNEL_L = 46.5 * IN;
+const TUNNEL_W = 6.125 * IN;
+
+// Depots
+const DEPOT_L = 30 * IN;
+
+// Spike marks
+const SPIKE_L = 10 * IN;
+
+// Obelisk
+const OBELISK_H = 23 * IN;
+const OBELISK_FACE_W = 11 * IN;
+
+// AprilTag
+const TAG_SIZE = 6.5 * IN;
+
+// Tape
+const TAPE_W = 1 * IN;
+const TAPE_H = 0.004;
 
 export class Field {
   scene: THREE.Scene;
@@ -39,9 +67,6 @@ export class Field {
   bodies: CANNON.Body[] = [];
   envMap: THREE.Texture | null;
 
-  // Animated elements
-  private obeliskGlows: THREE.Mesh[] = [];
-  private zoneRings: THREE.Mesh[] = [];
   private elapsedTime = 0;
 
   constructor(scene: THREE.Scene, world: CANNON.World, envMap: THREE.Texture | null = null) {
@@ -56,33 +81,35 @@ export class Field {
   private buildField() {
     this.buildPhysicsFloor();
     this.buildPhysicsWalls();
-    this.buildFloorSurface();
-    this.buildVisibleWalls();
-    this.buildInnerDividers();
+    this.buildFloorTiles();
+    this.buildPerimeterWalls();
+    this.buildGoals();
+    this.buildRamps();
+    this.buildLoadingZones();
+    this.buildBaseZones();
+    this.buildSecretTunnels();
+    this.buildLaunchZones();
+    this.buildDepots();
     this.buildSpikeMarks();
-    this.buildAscentStructure();
-    this.buildObelisks();
-    this.buildScoringZones();
-    this.buildSubmersible();
+    this.buildObelisk();
   }
 
-  // ─── PHYSICS FLOOR (invisible) ───
+  // ─── PHYSICS FLOOR ───
   private buildPhysicsFloor() {
     const gb = new CANNON.Body({ type: CANNON.Body.STATIC, shape: new CANNON.Plane() });
     gb.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
     this.world.addBody(gb);
   }
 
-  // ─── PHYSICS WALLS (invisible) ───
+  // ─── PHYSICS WALLS ───
   private buildPhysicsWalls() {
-    const ws = [
-      { p: [0, WALL_HEIGHT / 2, -HALF], s: [FIELD_SIZE / 2 + 0.05, WALL_HEIGHT / 2, 0.05] },
-      { p: [0, WALL_HEIGHT / 2, HALF], s: [FIELD_SIZE / 2 + 0.05, WALL_HEIGHT / 2, 0.05] },
-      { p: [-HALF, WALL_HEIGHT / 2, 0], s: [0.05, WALL_HEIGHT / 2, FIELD_SIZE / 2 + 0.05] },
-      { p: [HALF, WALL_HEIGHT / 2, 0], s: [0.05, WALL_HEIGHT / 2, FIELD_SIZE / 2 + 0.05] },
+    const defs = [
+      { p: [0, WALL_H / 2, -HALF], s: [HALF + WALL_T, WALL_H / 2, WALL_T / 2] },
+      { p: [0, WALL_H / 2,  HALF], s: [HALF + WALL_T, WALL_H / 2, WALL_T / 2] },
+      { p: [-HALF, WALL_H / 2, 0], s: [WALL_T / 2, WALL_H / 2, HALF + WALL_T] },
+      { p: [ HALF, WALL_H / 2, 0], s: [WALL_T / 2, WALL_H / 2, HALF + WALL_T] },
     ];
-
-    for (const w of ws) {
+    for (const w of defs) {
       const b = new CANNON.Body({
         type: CANNON.Body.STATIC,
         shape: new CANNON.Box(new CANNON.Vec3(w.s[0], w.s[1], w.s[2])),
@@ -93,681 +120,596 @@ export class Field {
     }
   }
 
-  // ─── FLOOR SURFACE ───
-  private buildFloorSurface() {
-    const floorMat = new THREE.MeshPhysicalMaterial({
-      color: 0x666666,
-      roughness: 0.55,
-      metalness: 0.05,
-      clearcoat: 0.1,
-      envMapIntensity: 0.3,
-    });
+  // ─── 6 × 6 FLOOR TILES ───
+  private buildFloorTiles() {
+    const darkGrey  = new THREE.MeshPhysicalMaterial({ color: 0x555555, roughness: 0.6, metalness: 0.05, clearcoat: 0.08 });
+    const lightGrey = new THREE.MeshPhysicalMaterial({ color: 0x666666, roughness: 0.55, metalness: 0.05, clearcoat: 0.1 });
+    const tilePlane = new THREE.PlaneGeometry(TILE - 0.002, TILE - 0.002);
 
-    const floor = new THREE.Mesh(
-      new THREE.PlaneGeometry(FIELD_SIZE, FIELD_SIZE),
-      floorMat
-    );
-    floor.rotation.x = -Math.PI / 2;
-    floor.position.y = 0.001;
-    floor.receiveShadow = true;
-    this.scene.add(floor);
-    this.meshes.push(floor);
+    for (let row = 0; row < 6; row++) {
+      for (let col = 0; col < 6; col++) {
+        const x = -HALF + TILE / 2 + col * TILE;
+        const z = -HALF + TILE / 2 + row * TILE;
+        const mat = (row + col) % 2 === 0 ? darkGrey : lightGrey;
 
-    // Tile grid lines (24x24 foam tiles, each ~15.24cm / 6 inches)
-    const tileCount = 24;
-    const tileSize = FIELD_SIZE / tileCount;
-    const lineMat = new THREE.MeshBasicMaterial({ color: 0x444444 });
-    const lineWidth = 0.004;
-    const lineHeight = 0.001;
+        const tile = new THREE.Mesh(tilePlane, mat);
+        tile.rotation.x = -Math.PI / 2;
+        tile.position.set(x, 0.001, z);
+        tile.receiveShadow = true;
+        this.scene.add(tile);
+      }
+    }
 
-    for (let i = 1; i < tileCount; i++) {
-      const offset = -HALF + i * tileSize;
-
-      // Lines along X
-      const hLine = new THREE.Mesh(
-        new THREE.BoxGeometry(FIELD_SIZE, lineHeight, lineWidth),
-        lineMat
-      );
+    // Tile seam lines
+    const seamMat = new THREE.MeshBasicMaterial({ color: 0x3a3a3a });
+    for (let i = 1; i < 6; i++) {
+      const offset = -HALF + i * TILE;
+      const hLine = new THREE.Mesh(new THREE.BoxGeometry(FIELD, 0.001, 0.003), seamMat);
       hLine.position.set(0, 0.002, offset);
       this.scene.add(hLine);
-
-      // Lines along Z
-      const vLine = new THREE.Mesh(
-        new THREE.BoxGeometry(lineWidth, lineHeight, FIELD_SIZE),
-        lineMat
-      );
+      const vLine = new THREE.Mesh(new THREE.BoxGeometry(0.003, 0.001, FIELD), seamMat);
       vLine.position.set(offset, 0.002, 0);
       this.scene.add(vLine);
     }
   }
 
-  // ─── VISIBLE PERIMETER WALLS ───
-  private buildVisibleWalls() {
+  // ─── PERIMETER WALLS ───
+  private buildPerimeterWalls() {
     const wallMat = new THREE.MeshPhysicalMaterial({
-      color: 0x888888,
-      roughness: 0.4,
-      metalness: 0.15,
-      clearcoat: 0.25,
-      clearcoatRoughness: 0.3,
-      envMapIntensity: 0.5,
-      side: THREE.DoubleSide,
+      color: 0x888888, roughness: 0.4, metalness: 0.15,
+      clearcoat: 0.25, side: THREE.DoubleSide,
+      transparent: true, opacity: 0.3,
     });
-
     const railMat = new THREE.MeshPhysicalMaterial({
-      color: 0x999999,
-      roughness: 0.25,
-      metalness: 0.3,
-      clearcoat: 0.4,
-      envMapIntensity: 0.6,
+      color: 0x999999, roughness: 0.25, metalness: 0.3, clearcoat: 0.4,
+      transparent: true, opacity: 0.3,
     });
+    const railH = 0.02;
+    const railOver = 0.008;
 
-    const railHeight = 0.02;
-    const railOverhang = 0.01;
-
-    // Wall definitions: [posX, posZ, sizeX, sizeZ]
     const walls: [number, number, number, number][] = [
-      [0, -HALF, FIELD_SIZE + WALL_THICKNESS, WALL_THICKNESS],  // back
-      [0, HALF, FIELD_SIZE + WALL_THICKNESS, WALL_THICKNESS],   // front
-      [-HALF, 0, WALL_THICKNESS, FIELD_SIZE],                   // left
-      [HALF, 0, WALL_THICKNESS, FIELD_SIZE],                    // right
+      [0, -HALF, FIELD + WALL_T, WALL_T],
+      [0,  HALF, FIELD + WALL_T, WALL_T],
+      [-HALF, 0, WALL_T, FIELD],
+      [ HALF, 0, WALL_T, FIELD],
     ];
 
-    for (const [wx, wz, wsX, wsZ] of walls) {
-      // Main wall panel
-      const wall = new THREE.Mesh(
-        new THREE.BoxGeometry(wsX, WALL_HEIGHT, wsZ),
-        wallMat
-      );
-      wall.position.set(wx, WALL_HEIGHT / 2, wz);
+    for (const [wx, wz, sx, sz] of walls) {
+      const wall = new THREE.Mesh(new THREE.BoxGeometry(sx, WALL_H, sz), wallMat);
+      wall.position.set(wx, WALL_H / 2, wz);
       wall.castShadow = true;
       wall.receiveShadow = true;
       this.scene.add(wall);
       this.meshes.push(wall);
 
-      // Top rail
-      const rail = new THREE.Mesh(
-        new THREE.BoxGeometry(wsX + railOverhang * 2, railHeight, wsZ + railOverhang * 2),
-        railMat
-      );
-      rail.position.set(wx, WALL_HEIGHT + railHeight / 2, wz);
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(sx + railOver * 2, railH, sz + railOver * 2), railMat);
+      rail.position.set(wx, WALL_H + railH / 2, wz);
       rail.castShadow = true;
       this.scene.add(rail);
-      this.meshes.push(rail);
     }
 
     // Corner brackets
-    const bracketMat = new THREE.MeshPhysicalMaterial({
-      color: 0x777777,
-      roughness: 0.35,
-      metalness: 0.2,
-      clearcoat: 0.3,
-    });
-    const bracketSize = 0.08;
-    const corners: [number, number][] = [
-      [-HALF, -HALF], [HALF, -HALF], [-HALF, HALF], [HALF, HALF],
-    ];
-    for (const [cx, cz] of corners) {
-      const bracket = new THREE.Mesh(
-        new THREE.BoxGeometry(bracketSize, WALL_HEIGHT + 0.01, bracketSize),
-        bracketMat
-      );
-      bracket.position.set(cx, WALL_HEIGHT / 2, cz);
-      bracket.castShadow = true;
-      this.scene.add(bracket);
-      this.meshes.push(bracket);
+    const bracketMat = new THREE.MeshPhysicalMaterial({ color: 0x777777, roughness: 0.35, metalness: 0.2, clearcoat: 0.3, transparent: true, opacity: 0.3 });
+    const bSz = 0.06;
+    for (const cx of [-HALF, HALF]) {
+      for (const cz of [-HALF, HALF]) {
+        const b = new THREE.Mesh(new THREE.BoxGeometry(bSz, WALL_H + 0.01, bSz), bracketMat);
+        b.position.set(cx, WALL_H / 2, cz);
+        b.castShadow = true;
+        this.scene.add(b);
+      }
     }
   }
 
-  // ─── INNER DIVIDER WALLS (spike mark barriers at X = ±DIVIDER_X) ───
-  private buildInnerDividers() {
-    const dividerMat = new THREE.MeshPhysicalMaterial({
-      color: 0x888888,
-      roughness: 0.4,
-      metalness: 0.15,
-      clearcoat: 0.25,
-      envMapIntensity: 0.5,
-      side: THREE.DoubleSide,
+  // ─── GOALS (Blue back-left, Red back-right) ───
+  // Simple tall colored panels in back corners with AprilTags
+  private buildGoals() {
+    // Blue goal: back-left corner, faces along back wall toward +X
+    this.buildGoal(-HALF + GOAL_D / 2, HALF - GOAL_W / 2, 'blue', Math.PI / 2, false);
+    // Red goal: back-right corner, faces along back wall toward -X
+    this.buildGoal(HALF - GOAL_D / 2, HALF - GOAL_W / 2, 'red', -Math.PI / 2, true);
+  }
+
+  private buildGoal(x: number, z: number, alliance: 'red' | 'blue', rotY: number, mirrorPeak: boolean) {
+    const group = new THREE.Group();
+    const color = alliance === 'red' ? 0xcc2222 : 0x2244cc;
+    const colorLight = alliance === 'red' ? 0xff4444 : 0x4466ff;
+    const T = GOAL_WALL_T;
+    const H = GOAL_H;
+
+    const goalMat = new THREE.MeshPhysicalMaterial({
+      color, roughness: 0.4, metalness: 0.3, clearcoat: 0.3,
     });
 
-    const dividerLength = FIELD_SIZE * 0.75;
+    const lipH = GOAL_LIP_H;  // 38.75" — height at adjacent/front corners
+    const peakH = H;           // 54" — height at arena (backmost) corner
 
-    for (const sign of [-1, 1]) {
-      const divider = new THREE.Mesh(
-        new THREE.BoxGeometry(WALL_THICKNESS, WALL_HEIGHT, dividerLength),
-        dividerMat
+    // Peak side: x=-W/2 for blue, x=+W/2 for red (mirrored so peak lands in arena corner)
+    const peakX = mirrorPeak ? GOAL_W / 2 : -GOAL_W / 2;
+    const lipX  = mirrorPeak ? -GOAL_W / 2 : GOAL_W / 2;
+
+    // Slant wall on the peak side (runs along depth, peaks at z=-D/2)
+    const slantSideShape = new THREE.Shape();
+    slantSideShape.moveTo(-GOAL_D / 2, 0);
+    slantSideShape.lineTo(GOAL_D / 2, 0);
+    slantSideShape.lineTo(GOAL_D / 2, peakH);
+    slantSideShape.lineTo(-GOAL_D / 2, lipH);
+    slantSideShape.closePath();
+    const slantSideGeo = new THREE.ExtrudeGeometry(slantSideShape, { depth: T, bevelEnabled: false });
+    const slantSideMesh = new THREE.Mesh(slantSideGeo, goalMat);
+    slantSideMesh.rotation.y = Math.PI / 2;
+    slantSideMesh.position.set(peakX, 0, 0);
+    slantSideMesh.castShadow = true;
+    group.add(slantSideMesh);
+
+    // Front wall (SLANT): at z=-D/2, peaks at peakX side, slopes to lip at lipX side
+    const frontShape = new THREE.Shape();
+    if (mirrorPeak) {
+      frontShape.moveTo(-GOAL_W / 2, 0);
+      frontShape.lineTo(GOAL_W / 2, 0);
+      frontShape.lineTo(GOAL_W / 2, peakH);   // peak at +W/2
+      frontShape.lineTo(-GOAL_W / 2, lipH);    // lip at -W/2
+    } else {
+      frontShape.moveTo(-GOAL_W / 2, 0);
+      frontShape.lineTo(GOAL_W / 2, 0);
+      frontShape.lineTo(GOAL_W / 2, lipH);     // lip at +W/2
+      frontShape.lineTo(-GOAL_W / 2, peakH);   // peak at -W/2
+    }
+    frontShape.closePath();
+    const frontGeo = new THREE.ExtrudeGeometry(frontShape, { depth: T, bevelEnabled: false });
+    const frontMesh = new THREE.Mesh(frontGeo, goalMat);
+    frontMesh.position.set(0, 0, -GOAL_D / 2);
+    frontMesh.castShadow = true;
+    group.add(frontMesh);
+
+    // Flat wall on the lip side, flat top at lipH
+    group.add(this.makeBox(lipX, lipH / 2, 0, T, lipH, GOAL_D, goalMat));
+
+    // Back wall (HORIZONTAL): inner side, flat top at lipH
+    group.add(this.makeBox(0, lipH / 2, GOAL_D / 2, GOAL_W, lipH, T, goalMat));
+
+    // AprilTag on front face (centered, 9.25" up)
+    this.addAprilTag(group, 0, 9.25 * IN, GOAL_D / 2 + 0.002, 0, TAG_SIZE);
+
+    // Glow light
+    const glow = new THREE.PointLight(colorLight, 1.5, 3);
+    glow.position.set(0, H + 4 * IN, 0);
+    group.add(glow);
+
+    group.rotation.y = rotY;
+    group.position.set(x, 0, z);
+    this.scene.add(group);
+    this.meshes.push(group);
+
+    // Physics colliders — individual walls so interior is hollow (balls can enter from top)
+    const wallDefs = [
+      // Peak-side wall
+      { lx: peakX, lz: 0, hw: T / 2, hh: peakH / 2, hd: GOAL_D / 2, cy: peakH / 2 },
+      // Lip-side wall
+      { lx: lipX, lz: 0, hw: T / 2, hh: lipH / 2, hd: GOAL_D / 2, cy: lipH / 2 },
+      // Front wall (z=-D/2)
+      { lx: 0, lz: -GOAL_D / 2, hw: GOAL_W / 2, hh: lipH / 2, hd: T / 2, cy: lipH / 2 },
+      // Back wall (z=+D/2)
+      { lx: 0, lz: GOAL_D / 2, hw: GOAL_W / 2, hh: lipH / 2, hd: T / 2, cy: lipH / 2 },
+    ];
+    for (const w of wallDefs) {
+      const wallBody = new CANNON.Body({ type: CANNON.Body.STATIC });
+      wallBody.addShape(new CANNON.Box(new CANNON.Vec3(w.hw, w.hh, w.hd)));
+      // Rotate local position by group rotation
+      const cosR = Math.cos(rotY);
+      const sinR = Math.sin(rotY);
+      const wx = w.lx * cosR + w.lz * sinR;
+      const wz = -w.lx * sinR + w.lz * cosR;
+      wallBody.position.set(x + wx, w.cy, z + wz);
+      wallBody.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), rotY);
+      this.world.addBody(wallBody);
+      this.bodies.push(wallBody);
+    }
+  }
+
+  // ─── CLASSIFIER RAMPS (along side walls from goals toward front) ───
+  private buildRamps() {
+    const rampMat = new THREE.MeshPhysicalMaterial({
+      color: 0x994444, roughness: 0.5, metalness: 0.4, clearcoat: 0.3,
+    });
+    const railMat = new THREE.MeshPhysicalMaterial({
+      color: 0x555555, roughness: 0.3, metalness: 0.7, clearcoat: 0.4,
+    });
+
+    // Blue ramp along left wall (-X side)
+    // Runs from back wall (HALF) toward front, ending at HALF - RAMP_LENGTH
+    const rampEndZ = HALF - RAMP_LENGTH;
+
+    for (const side of [-1, 1] as const) {
+      const sideX = side * (HALF - RAMP_W / 2);
+      const rampCenterZ = HALF - RAMP_LENGTH / 2;
+
+      // Ramp floor (slightly angled — higher at goal end)
+      const rampFloor = new THREE.Mesh(
+        new THREE.BoxGeometry(RAMP_W, RAMP_RAIL_H * 0.3, RAMP_LENGTH),
+        rampMat
       );
-      divider.position.set(sign * DIVIDER_X, WALL_HEIGHT / 2, 0);
-      divider.castShadow = true;
-      divider.receiveShadow = true;
-      this.scene.add(divider);
-      this.meshes.push(divider);
+      rampFloor.position.set(sideX, RAMP_RAIL_H * 0.15, rampCenterZ);
+      rampFloor.castShadow = true;
+      rampFloor.receiveShadow = true;
+      this.scene.add(rampFloor);
 
-      // Top rail on divider
+      // Inner rail (facing field center)
+      const innerX = side * (HALF - RAMP_W);
       const rail = new THREE.Mesh(
-        new THREE.BoxGeometry(WALL_THICKNESS + 0.02, 0.015, dividerLength),
-        new THREE.MeshPhysicalMaterial({
-          color: 0x999999,
-          roughness: 0.25,
-          metalness: 0.3,
-          clearcoat: 0.4,
-        })
+        new THREE.BoxGeometry(0.01, RAMP_RAIL_H, RAMP_LENGTH),
+        railMat
       );
-      rail.position.set(sign * DIVIDER_X, WALL_HEIGHT + 0.0075, 0);
+      rail.position.set(innerX, RAMP_RAIL_H / 2, rampCenterZ);
+      rail.castShadow = true;
       this.scene.add(rail);
-      this.meshes.push(rail);
 
-      // Physics body for divider
+      // End cap at front end of ramp
+      const endCap = new THREE.Mesh(
+        new THREE.BoxGeometry(RAMP_W, RAMP_RAIL_H, 0.01),
+        railMat
+      );
+      endCap.position.set(sideX, RAMP_RAIL_H / 2, rampEndZ);
+      this.scene.add(endCap);
+
+      // Gate (small mechanism at end of ramp)
+      const gateMat = new THREE.MeshPhysicalMaterial({
+        color: 0x333333, roughness: 0.3, metalness: 0.8, clearcoat: 0.5,
+      });
+      const gate = new THREE.Mesh(
+        new THREE.BoxGeometry(RAMP_W * 0.8, 5.5 * IN, 2 * IN),
+        gateMat
+      );
+      gate.position.set(sideX, 5.5 * IN / 2, rampEndZ + 1 * IN);
+      this.scene.add(gate);
+
+      // Physics collider for ramp
       const body = new CANNON.Body({
         type: CANNON.Body.STATIC,
-        shape: new CANNON.Box(new CANNON.Vec3(WALL_THICKNESS / 2, WALL_HEIGHT / 2, dividerLength / 2)),
+        shape: new CANNON.Box(new CANNON.Vec3(RAMP_W / 2, RAMP_RAIL_H / 2, RAMP_LENGTH / 2)),
       });
-      body.position.set(sign * DIVIDER_X, WALL_HEIGHT / 2, 0);
+      body.position.set(sideX, RAMP_RAIL_H / 2, rampCenterZ);
       this.world.addBody(body);
       this.bodies.push(body);
     }
   }
 
-  // ─── SPIKE MARKS: Colored tape lines on the floor ───
+  // ─── LOADING ZONES (front corners, white tape) ───
+  private buildLoadingZones() {
+    // Red loading zone: front-left corner (-X, -Z)
+    this.buildTapeZone(-HALF + LOAD_SIZE / 2, -HALF + LOAD_SIZE / 2, LOAD_SIZE, 0xffffff, 'LOAD');
+    // Blue loading zone: front-right corner (+X, -Z)
+    this.buildTapeZone(HALF - LOAD_SIZE / 2, -HALF + LOAD_SIZE / 2, LOAD_SIZE, 0xffffff, 'LOAD');
+  }
+
+  // ─── BASE ZONES (front area, alliance-colored tape) ───
+  private buildBaseZones() {
+    // Red base zone: near seam W,1 (front-left area)
+    // Seam W is 2nd from left = -HALF + 2*TILE, Seam 1 is front = -HALF + 1*TILE
+    // Base zone is adjacent to these seams, so its corner is at the seam intersection
+    const redBaseX = -HALF + 2 * TILE - BASE_SIZE / 2;
+    const redBaseZ = -HALF + TILE - BASE_SIZE / 2;
+    this.buildTapeZone(redBaseX, redBaseZ, BASE_SIZE, 0xcc2222, 'BASE');
+
+    // Blue base zone: near seam Y,1 (front-right area)
+    // Seam Y is 4th from left = -HALF + 4*TILE
+    const blueBaseX = -HALF + 4 * TILE + BASE_SIZE / 2;
+    const blueBaseZ = -HALF + TILE - BASE_SIZE / 2;
+    this.buildTapeZone(blueBaseX, blueBaseZ, BASE_SIZE, 0x2244cc, 'BASE');
+  }
+
+  // ─── SECRET TUNNELS (connect ramp ends to loading zones) ───
+  private buildSecretTunnels() {
+    const rampEndZ = HALF - RAMP_LENGTH;
+    const tunnelMat = new THREE.MeshStandardMaterial({
+      color: 0xcc2222, emissive: 0xcc2222, emissiveIntensity: 0.15,
+    });
+    const tunnelMatBlue = new THREE.MeshStandardMaterial({
+      color: 0x2244cc, emissive: 0x2244cc, emissiveIntensity: 0.15,
+    });
+
+    // Red secret tunnel: along left wall (-X), from ramp end toward front
+    // Runs from rampEndZ toward loading zone at -HALF + LOAD_SIZE
+    const tunnelStartZ = rampEndZ;
+    const tunnelEndZ = tunnelStartZ - TUNNEL_L;
+    const tunnelCenterZ = (tunnelStartZ + tunnelEndZ) / 2;
+
+    // Left side (red tunnel)
+    for (const edge of [-1, 1]) {
+      const tape = new THREE.Mesh(
+        new THREE.BoxGeometry(TAPE_W, TAPE_H, TUNNEL_L), tunnelMat
+      );
+      tape.position.set(-HALF + TUNNEL_W / 2 + edge * TUNNEL_W / 2, TAPE_H / 2, tunnelCenterZ);
+      this.scene.add(tape);
+    }
+
+    // Right side (blue tunnel)
+    for (const edge of [-1, 1]) {
+      const tape = new THREE.Mesh(
+        new THREE.BoxGeometry(TAPE_W, TAPE_H, TUNNEL_L), tunnelMatBlue
+      );
+      tape.position.set(HALF - TUNNEL_W / 2 - edge * TUNNEL_W / 2, TAPE_H / 2, tunnelCenterZ);
+      this.scene.add(tape);
+    }
+
+    // Translucent fills
+    const fillMatRed = new THREE.MeshStandardMaterial({
+      color: 0xcc2222, transparent: true, opacity: 0.08, side: THREE.DoubleSide,
+    });
+    const fillRed = new THREE.Mesh(new THREE.PlaneGeometry(TUNNEL_W, TUNNEL_L), fillMatRed);
+    fillRed.rotation.x = -Math.PI / 2;
+    fillRed.position.set(-HALF + TUNNEL_W / 2, 0.003, tunnelCenterZ);
+    this.scene.add(fillRed);
+
+    const fillMatBlue = new THREE.MeshStandardMaterial({
+      color: 0x2244cc, transparent: true, opacity: 0.08, side: THREE.DoubleSide,
+    });
+    const fillBlue = new THREE.Mesh(new THREE.PlaneGeometry(TUNNEL_W, TUNNEL_L), fillMatBlue);
+    fillBlue.rotation.x = -Math.PI / 2;
+    fillBlue.position.set(HALF - TUNNEL_W / 2, 0.003, tunnelCenterZ);
+    this.scene.add(fillBlue);
+  }
+
+  // ─── LAUNCH ZONES (white tape boundaries) ───
+  private buildLaunchZones() {
+    const whiteMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.2,
+    });
+
+    // Back launch zone: full width x 3 tiles deep, at goal side
+    const backZ = HALF - 1.5 * TILE;
+    const backFrontZ = HALF - 3 * TILE;
+    // Front edge line
+    this.scene.add(this.makeBox(0, TAPE_H / 2, backFrontZ, FIELD, TAPE_H, TAPE_W, whiteMat));
+
+    // Front launch zone: 2 tiles wide x 1 tile deep, centered at audience side
+    const frontCenterZ = -HALF + 0.5 * TILE;
+    const frontW = 2 * TILE;
+    // Left line
+    this.scene.add(this.makeBox(-frontW / 2, TAPE_H / 2, frontCenterZ, TAPE_W, TAPE_H, TILE, whiteMat));
+    // Right line
+    this.scene.add(this.makeBox(frontW / 2, TAPE_H / 2, frontCenterZ, TAPE_W, TAPE_H, TILE, whiteMat));
+    // Back line (away from audience)
+    this.scene.add(this.makeBox(0, TAPE_H / 2, -HALF + TILE, frontW, TAPE_H, TAPE_W, whiteMat));
+
+    // Translucent fills for launch zones
+    const fillMat = new THREE.MeshStandardMaterial({
+      color: 0xcccc44, emissive: 0xcccc44, emissiveIntensity: 0.05,
+      transparent: true, opacity: 0.06, side: THREE.DoubleSide,
+    });
+    // Back launch zone fill
+    const backFill = new THREE.Mesh(new THREE.PlaneGeometry(FIELD, 3 * TILE), fillMat);
+    backFill.rotation.x = -Math.PI / 2;
+    backFill.position.set(0, 0.003, backZ);
+    this.scene.add(backFill);
+
+    // Front launch zone fill
+    const frontFill = new THREE.Mesh(new THREE.PlaneGeometry(frontW, TILE), fillMat);
+    frontFill.rotation.x = -Math.PI / 2;
+    frontFill.position.set(0, 0.003, frontCenterZ);
+    this.scene.add(frontFill);
+  }
+
+  // ─── DEPOTS (white tape at base of each goal) ───
+  private buildDepots() {
+    const whiteMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.3,
+    });
+
+    // Blue depot at base of blue goal (back-left)
+    this.scene.add(this.makeBox(-HALF + GOAL_D + DEPOT_L / 2, TAPE_H / 2, HALF - GOAL_WALL_T / 2, DEPOT_L, TAPE_H, TAPE_W, whiteMat));
+
+    // Red depot at base of red goal (back-right)
+    this.scene.add(this.makeBox(HALF - GOAL_D - DEPOT_L / 2, TAPE_H / 2, HALF - GOAL_WALL_T / 2, DEPOT_L, TAPE_H, TAPE_W, whiteMat));
+  }
+
+  // ─── SPIKE MARKS (6 white tape marks) ───
   private buildSpikeMarks() {
-    const tapeWidth = 0.025;
-    const tapeLength = 0.20 * S;
-    const tapeHeight = 0.003;
-
-    // Spike rows at Z positions (from STL: Y = -0.9, -0.3, +0.3 → game Z)
-    const spikeZs = [-0.9 * S, -0.3 * S, 0.3 * S];
-    // X range between inner dividers and outer walls
-    const spikeXCenter = (DIVIDER_X + HALF) / 2;
-
-    const purpleMat = new THREE.MeshStandardMaterial({
-      color: 0x8833aa,
-      emissive: 0x8833aa,
-      emissiveIntensity: 0.15,
-    });
-    const greenMat = new THREE.MeshStandardMaterial({
-      color: 0x33aa44,
-      emissive: 0x33aa44,
-      emissiveIntensity: 0.15,
+    const whiteMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.25,
     });
 
-    for (const sz of spikeZs) {
-      for (const sideX of [-1, 1]) {
-        const mat = sideX < 0 ? purpleMat : greenMat;
+    // 6 spike marks arranged in two columns of 3
+    // Left column (between tiles 2-4, X ~ -1 tile from center)
+    // Right column (between tiles 2-4, X ~ +1 tile from center)
+    const leftX = -TILE;
+    const rightX = TILE;
+    const zPositions = [
+      -HALF + 1.5 * TILE,   // row 2
+      -HALF + 2.5 * TILE,   // row 3
+      -HALF + 3.5 * TILE,   // row 4
+    ];
 
-        // Horizontal tape line
-        const tape = new THREE.Mesh(
-          new THREE.BoxGeometry(tapeLength, tapeHeight, tapeWidth),
-          mat
-        );
-        tape.position.set(sideX * spikeXCenter, 0.003, sz);
-        tape.receiveShadow = true;
-        this.scene.add(tape);
-        this.meshes.push(tape);
-      }
+    for (const sz of zPositions) {
+      // Left spike mark (horizontal line)
+      this.scene.add(this.makeBox(leftX, TAPE_H / 2, sz, SPIKE_L, TAPE_H, TAPE_W, whiteMat));
+      // Right spike mark
+      this.scene.add(this.makeBox(rightX, TAPE_H / 2, sz, SPIKE_L, TAPE_H, TAPE_W, whiteMat));
     }
   }
 
-  // ─── ASCENT STRUCTURE: Posts, bars, and frame on +Z side ───
-  private buildAscentStructure() {
+  // ─── OBELISK (triangular prism, outside back wall) ───
+  // 23" tall, 11" wide faces, equilateral triangle cross-section
+  // 3 faces with motifs: GPP, PGP, PPG (G=green, P=purple)
+  // AprilTags IDs 21, 22, 23
+  private buildObelisk() {
     const group = new THREE.Group();
+    const side = OBELISK_FACE_W;          // 11"
+    const inradius = side / (2 * Math.sqrt(3));  // distance from center to face
 
-    const barMat = new THREE.MeshPhysicalMaterial({
-      color: 0xcccccc,
-      roughness: 0.1,
-      metalness: 0.95,
-      clearcoat: 0.7,
-      clearcoatRoughness: 0.1,
-      envMapIntensity: 1.0,
+    // Solid triangular prism body using CylinderGeometry(radiusTop, radiusBottom, height, radialSegments)
+    // circumradius = side / sqrt(3)
+    const circumR = side / Math.sqrt(3);
+    const bodyGeo = new THREE.CylinderGeometry(circumR, circumR, OBELISK_H, 3);
+    const bodyMat = new THREE.MeshPhysicalMaterial({
+      color: 0x2a2a2a, roughness: 0.35, metalness: 0.5, clearcoat: 0.3,
     });
+    const body = new THREE.Mesh(bodyGeo, bodyMat);
+    body.position.y = OBELISK_H / 2;
+    // Rotate so one face points toward -Z (toward field)
+    body.rotation.y = Math.PI / 6;
+    group.add(body);
 
-    const postMat = new THREE.MeshPhysicalMaterial({
-      color: 0x555555,
-      roughness: 0.25,
-      metalness: 0.85,
-      clearcoat: 0.4,
-      envMapIntensity: 0.6,
-    });
+    // Motif patterns: 3 circles per face (G=green, P=purple)
+    const motifs: [number, number, number][] = [
+      [0x33aa44, 0x8833aa, 0x8833aa],  // GPP — Tag 21
+      [0x8833aa, 0x33aa44, 0x8833aa],  // PGP — Tag 22
+      [0x8833aa, 0x8833aa, 0x33aa44],  // PPG — Tag 23
+    ];
 
-    const tallPostMat = new THREE.MeshPhysicalMaterial({
-      color: 0x666666,
-      roughness: 0.2,
-      metalness: 0.9,
-      clearcoat: 0.5,
-      envMapIntensity: 0.7,
-    });
+    // 3 face angles: after body rotation of PI/6, faces point at these angles
+    const faceAngles = [
+      Math.PI / 6 + Math.PI,            // face 0: toward -Z (field-facing)
+      Math.PI / 6 + Math.PI + 2 * Math.PI / 3,  // face 1: toward +X
+      Math.PI / 6 + Math.PI - 2 * Math.PI / 3,  // face 2: toward -X
+    ];
 
-    // Post positions: inner posts at X=±ASCENT_INNER_X, wall posts at X=±HALF
-    const postXs = [-ASCENT_INNER_X, ASCENT_INNER_X];
-    const postZs = [ASCENT_FRONT_Z, ASCENT_BACK_Z];
+    const circleR = 1.2 * IN;  // radius of each motif dot
+    const circleGeo = new THREE.CircleGeometry(circleR, 16);
+    const dotSpacing = side / 3.5;
 
-    // Vertical posts at the 4 inner corners of the ascent zone
-    for (const px of postXs) {
-      for (const pz of postZs) {
-        // Short post up to high bar level
-        const postHeight = ASCENT_HIGH_BAR_Y + 0.05;
-        const post = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.025, 0.03, postHeight, 12),
-          postMat
+    for (let i = 0; i < 3; i++) {
+      const ang = faceAngles[i];
+      // Normal pointing outward from face
+      const nx = Math.sin(ang);
+      const nz = Math.cos(ang);
+      // Face center position (at inradius distance from center)
+      const fx = nx * (inradius + 0.002);
+      const fz = nz * (inradius + 0.002);
+      // Tangent direction (along face, horizontal)
+      const tx = Math.cos(ang);
+      const tz = -Math.sin(ang);
+
+      // 3 colored dots side by side
+      for (let d = 0; d < 3; d++) {
+        const offset = (d - 1) * dotSpacing;
+        const dotMat = new THREE.MeshPhysicalMaterial({
+          color: motifs[i][d],
+          emissive: motifs[i][d],
+          emissiveIntensity: 0.2,
+          roughness: 0.4,
+        });
+        const dot = new THREE.Mesh(circleGeo, dotMat);
+        dot.position.set(
+          fx + tx * offset,
+          OBELISK_H * 0.6,
+          fz + tz * offset
         );
-        post.position.set(px, postHeight / 2, pz);
-        post.castShadow = true;
-        group.add(post);
-
-        // Base plate
-        const plate = new THREE.Mesh(
-          new THREE.BoxGeometry(0.08, 0.008, 0.08),
-          postMat
-        );
-        plate.position.set(px, 0.004, pz);
-        group.add(plate);
+        dot.rotation.y = ang + Math.PI;
+        group.add(dot);
       }
-    }
 
-    // Tall corner towers at the back corners of the ascent zone
-    const towerXs = [-ASCENT_INNER_X, ASCENT_INNER_X, -1.2 * S, 1.2 * S];
-    for (const tx of towerXs) {
-      const tower = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.02, 0.025, ASCENT_POST_HEIGHT, 12),
-        tallPostMat
-      );
-      tower.position.set(tx, ASCENT_POST_HEIGHT / 2, ASCENT_BACK_Z);
-      tower.castShadow = true;
-      group.add(tower);
+      // AprilTag below the dots
+      const tagOffset = 0.003;
+      const tagGrp = new THREE.Group();
+      const tagSz = TAG_SIZE * 0.7;
 
-      // Cap on tall tower
-      const cap = new THREE.Mesh(
-        new THREE.SphereGeometry(0.025, 10, 10),
-        barMat
-      );
-      cap.position.set(tx, ASCENT_POST_HEIGHT, ASCENT_BACK_Z);
-      group.add(cap);
-    }
+      const borderMat = new THREE.MeshStandardMaterial({
+        color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.15,
+      });
+      tagGrp.add(new THREE.Mesh(new THREE.PlaneGeometry(tagSz * 1.25, tagSz * 1.25), borderMat));
 
-    // Also tall posts at the wall-mounted positions
-    for (const wallX of [-HALF, HALF]) {
-      for (const tz of [ASCENT_FRONT_Z, ASCENT_BACK_Z]) {
-        const wallPost = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.02, 0.025, ASCENT_HIGH_BAR_Y + 0.05, 10),
-          postMat
-        );
-        wallPost.position.set(wallX, (ASCENT_HIGH_BAR_Y + 0.05) / 2, tz);
-        wallPost.castShadow = true;
-        group.add(wallPost);
-      }
-    }
-
-    // Horizontal bars at two heights, running along Z from ASCENT_FRONT_Z to ASCENT_BACK_Z
-    const barSpanZ = ASCENT_BACK_Z - ASCENT_FRONT_Z;
-    const barCenterZ = (ASCENT_FRONT_Z + ASCENT_BACK_Z) / 2;
-    const barHeights = [ASCENT_LOW_BAR_Y, ASCENT_HIGH_BAR_Y];
-
-    for (const bh of barHeights) {
-      for (const bx of postXs) {
-        // Bar running front-to-back
-        const bar = new THREE.Mesh(
-          new THREE.CylinderGeometry(ASCENT_BAR_RADIUS, ASCENT_BAR_RADIUS, barSpanZ, 16),
-          barMat
-        );
-        bar.rotation.x = Math.PI / 2;
-        bar.position.set(bx, bh, barCenterZ);
-        bar.castShadow = true;
-        group.add(bar);
-
-        // End caps
-        for (const endZ of [ASCENT_FRONT_Z, ASCENT_BACK_Z]) {
-          const cap = new THREE.Mesh(
-            new THREE.SphereGeometry(ASCENT_BAR_RADIUS * 1.3, 10, 10),
-            barMat
+      const cellSz = tagSz / 4;
+      const bk = new THREE.MeshStandardMaterial({ color: 0x111111 });
+      const wh = new THREE.MeshStandardMaterial({ color: 0xeeeeee });
+      const pat = [[1,0,1,0],[0,1,0,1],[1,1,0,0],[0,0,1,1]];
+      for (let r = 0; r < 4; r++) {
+        for (let c = 0; c < 4; c++) {
+          const cell = new THREE.Mesh(
+            new THREE.PlaneGeometry(cellSz * 0.9, cellSz * 0.9),
+            pat[r][c] ? bk : wh
           );
-          cap.position.set(bx, bh, endZ);
-          group.add(cap);
+          cell.position.set((c - 1.5) * cellSz, (1.5 - r) * cellSz, 0.001);
+          tagGrp.add(cell);
         }
-
-        // Physics collider for bar
-        const barBody = new CANNON.Body({
-          type: CANNON.Body.STATIC,
-          shape: new CANNON.Box(new CANNON.Vec3(ASCENT_BAR_RADIUS, ASCENT_BAR_RADIUS, barSpanZ / 2)),
-        });
-        barBody.position.set(bx, bh, barCenterZ);
-        this.world.addBody(barBody);
-        this.bodies.push(barBody);
       }
+      tagGrp.position.set(
+        fx + nx * tagOffset,
+        OBELISK_H * 0.25,
+        fz + nz * tagOffset
+      );
+      tagGrp.rotation.y = ang + Math.PI;
+      group.add(tagGrp);
     }
 
-    // Cross-bars connecting left and right sides at front and back
-    const crossSpanX = ASCENT_INNER_X * 2;
-    for (const bh of barHeights) {
-      for (const cz of postZs) {
-        const crossBar = new THREE.Mesh(
-          new THREE.CylinderGeometry(ASCENT_BAR_RADIUS * 0.8, ASCENT_BAR_RADIUS * 0.8, crossSpanX, 12),
-          barMat
-        );
-        crossBar.rotation.z = Math.PI / 2;
-        crossBar.position.set(0, bh, cz);
-        crossBar.castShadow = true;
-        group.add(crossBar);
-
-        // Physics for cross-bar
-        const crossBody = new CANNON.Body({
-          type: CANNON.Body.STATIC,
-          shape: new CANNON.Box(new CANNON.Vec3(crossSpanX / 2, ASCENT_BAR_RADIUS, ASCENT_BAR_RADIUS)),
-        });
-        crossBody.position.set(0, bh, cz);
-        this.world.addBody(crossBody);
-        this.bodies.push(crossBody);
-      }
-    }
-
+    // Position: centered on back wall, outside perimeter
+    group.position.set(0, 0, HALF + WALL_T + inradius + 3 * IN);
     this.scene.add(group);
     this.meshes.push(group);
   }
 
-  // ─── OBELISKS: 4 tapered pillars at symmetric field positions ───
-  private buildObelisks() {
-    const obeliskPositions: [number, number, number][] = [
-      [-0.90, 0, -0.90],  // back-left
-      [ 0.90, 0, -0.90],  // back-right
-      [-0.90, 0,  0.90],  // front-left
-      [ 0.90, 0,  0.90],  // front-right
-    ];
+  // ─── TAPE ZONE HELPER ───
+  private buildTapeZone(cx: number, cz: number, size: number, color: number, _label: string) {
+    const mat = new THREE.MeshStandardMaterial({
+      color, emissive: color, emissiveIntensity: 0.25,
+    });
 
-    const obeliskColors: number[] = [
-      0x6644cc, // purple tint
-      0x6644cc,
-      0x22aa55, // green tint
-      0x22aa55,
-    ];
+    // Border tapes (4 edges)
+    this.scene.add(this.makeBox(cx, TAPE_H / 2, cz - size / 2, size, TAPE_H, TAPE_W, mat));
+    this.scene.add(this.makeBox(cx, TAPE_H / 2, cz + size / 2, size, TAPE_H, TAPE_W, mat));
+    this.scene.add(this.makeBox(cx - size / 2, TAPE_H / 2, cz, TAPE_W, TAPE_H, size, mat));
+    this.scene.add(this.makeBox(cx + size / 2, TAPE_H / 2, cz, TAPE_W, TAPE_H, size, mat));
 
-    for (let i = 0; i < obeliskPositions.length; i++) {
-      const [ox, , oz] = obeliskPositions[i];
-      const color = obeliskColors[i];
-      this.buildSingleObelisk(ox, oz, color);
-    }
+    // Translucent fill
+    const fillMat = new THREE.MeshStandardMaterial({
+      color, emissive: color, emissiveIntensity: 0.08,
+      transparent: true, opacity: 0.12, side: THREE.DoubleSide,
+    });
+    const fill = new THREE.Mesh(new THREE.PlaneGeometry(size, size), fillMat);
+    fill.rotation.x = -Math.PI / 2;
+    fill.position.set(cx, 0.003, cz);
+    this.scene.add(fill);
   }
 
-  private buildSingleObelisk(x: number, z: number, accentColor: number) {
+  // ─── APRILTAG HELPER ───
+  private addAprilTag(parent: THREE.Object3D, x: number, y: number, z: number, rotY: number, size: number) {
     const group = new THREE.Group();
 
-    // Main obelisk body — tapered box (custom geometry)
-    const geo = new THREE.CylinderGeometry(OBELISK_TOP / 2, OBELISK_BASE / 2, OBELISK_HEIGHT, 4);
-    geo.rotateY(Math.PI / 4); // align edges with field axes
-    const mat = new THREE.MeshPhysicalMaterial({
-      color: 0x2a2a2a,
-      roughness: 0.2,
-      metalness: 0.7,
-      clearcoat: 0.6,
-      clearcoatRoughness: 0.15,
-      envMapIntensity: 0.8,
-    });
-    const obelisk = new THREE.Mesh(geo, mat);
-    obelisk.position.y = OBELISK_HEIGHT / 2;
-    obelisk.castShadow = true;
-    obelisk.receiveShadow = true;
-    group.add(obelisk);
+    const borderMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.1 });
+    const border = new THREE.Mesh(new THREE.PlaneGeometry(size * 1.3, size * 1.3), borderMat);
+    group.add(border);
 
-    // Accent stripe running up the obelisk
-    const stripeGeo = new THREE.BoxGeometry(0.008, OBELISK_HEIGHT * 0.85, OBELISK_BASE * 0.6);
-    const stripeMat = new THREE.MeshPhysicalMaterial({
-      color: accentColor,
-      emissive: accentColor,
-      emissiveIntensity: 0.3,
-      roughness: 0.3,
-      metalness: 0.5,
-      clearcoat: 0.8,
-      envMapIntensity: 0.6,
-    });
-    const stripe = new THREE.Mesh(stripeGeo, stripeMat);
-    stripe.position.set(OBELISK_BASE / 2 * 0.7, OBELISK_HEIGHT / 2, 0);
-    group.add(stripe);
-
-    // Second stripe on perpendicular face
-    const stripe2 = new THREE.Mesh(stripeGeo, stripeMat);
-    stripe2.rotation.y = Math.PI / 2;
-    stripe2.position.set(0, OBELISK_HEIGHT / 2, OBELISK_BASE / 2 * 0.7);
-    group.add(stripe2);
-
-    // Glowing cap on top
-    const capGeo = new THREE.CylinderGeometry(OBELISK_TOP / 2 + 0.005, OBELISK_TOP / 2 + 0.01, 0.03, 4);
-    capGeo.rotateY(Math.PI / 4);
-    const capMat = new THREE.MeshStandardMaterial({
-      color: accentColor,
-      emissive: accentColor,
-      emissiveIntensity: 1.2,
-    });
-    const cap = new THREE.Mesh(capGeo, capMat);
-    cap.position.y = OBELISK_HEIGHT + 0.015;
-    group.add(cap);
-    this.obeliskGlows.push(cap);
-
-    // Point light at the top for local glow
-    const glow = new THREE.PointLight(accentColor, 0.6, 1.2);
-    glow.position.y = OBELISK_HEIGHT + 0.05;
-    group.add(glow);
-
-    // Base pedestal
-    const baseMat = new THREE.MeshPhysicalMaterial({
-      color: 0x444444,
-      roughness: 0.3,
-      metalness: 0.8,
-      clearcoat: 0.4,
-      envMapIntensity: 0.5,
-    });
-    const base = new THREE.Mesh(
-      new THREE.BoxGeometry(OBELISK_BASE + 0.04, 0.025, OBELISK_BASE + 0.04),
-      baseMat
-    );
-    base.position.y = 0.0125;
-    base.receiveShadow = true;
-    group.add(base);
-
-    group.position.set(x, 0, z);
-    this.scene.add(group);
-    this.meshes.push(group);
-
-    // Physics body for the obelisk
-    const halfBase = OBELISK_BASE / 2;
-    const halfH = OBELISK_HEIGHT / 2;
-    const body = new CANNON.Body({
-      type: CANNON.Body.STATIC,
-      shape: new CANNON.Box(new CANNON.Vec3(halfBase, halfH, halfBase)),
-    });
-    body.position.set(x, halfH, z);
-    this.world.addBody(body);
-    this.bodies.push(body);
-  }
-
-  // ─── SCORING ZONES: Illuminated target areas on the floor ───
-  private buildScoringZones() {
-    const zonePositions: [number, number, number][] = [
-      [0, 0.005, -HALF + 0.50],   // back center
-      [0, 0.005,  HALF - 0.50],   // front center
-      [-HALF + 0.50, 0.005, 0],   // left center
-      [ HALF - 0.50, 0.005, 0],   // right center
+    const cellSize = size / 4;
+    const blackMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+    const whiteMat = new THREE.MeshStandardMaterial({ color: 0xeeeeee });
+    const pattern = [
+      [1, 0, 1, 0],
+      [0, 1, 0, 1],
+      [1, 1, 0, 0],
+      [0, 0, 1, 1],
     ];
-
-    const zoneColors: number[] = [0x6644cc, 0x6644cc, 0x22aa55, 0x22aa55];
-
-    for (let i = 0; i < zonePositions.length; i++) {
-      const [zx, zy, zz] = zonePositions[i];
-      const color = zoneColors[i];
-
-      // Outer ring
-      const ringGeo = new THREE.RingGeometry(ZONE_SIZE / 2 - 0.02, ZONE_SIZE / 2, 32);
-      const ringMat = new THREE.MeshStandardMaterial({
-        color,
-        emissive: color,
-        emissiveIntensity: 0.5,
-        side: THREE.DoubleSide,
-        transparent: true,
-        opacity: 0.7,
-      });
-      const ring = new THREE.Mesh(ringGeo, ringMat);
-      ring.rotation.x = -Math.PI / 2;
-      ring.position.set(zx, zy, zz);
-      this.scene.add(ring);
-      this.meshes.push(ring);
-      this.zoneRings.push(ring);
-
-      // Inner circle (translucent fill)
-      const innerGeo = new THREE.CircleGeometry(ZONE_SIZE / 2 - 0.03, 32);
-      const innerMat = new THREE.MeshStandardMaterial({
-        color,
-        emissive: color,
-        emissiveIntensity: 0.15,
-        side: THREE.DoubleSide,
-        transparent: true,
-        opacity: 0.2,
-      });
-      const inner = new THREE.Mesh(innerGeo, innerMat);
-      inner.rotation.x = -Math.PI / 2;
-      inner.position.set(zx, zy - 0.001, zz);
-      this.scene.add(inner);
-      this.meshes.push(inner);
-
-      // Center marker dot
-      const dot = new THREE.Mesh(
-        new THREE.CircleGeometry(0.03, 16),
-        new THREE.MeshStandardMaterial({
-          color: 0xffffff,
-          emissive: color,
-          emissiveIntensity: 0.8,
-          side: THREE.DoubleSide,
-        })
-      );
-      dot.rotation.x = -Math.PI / 2;
-      dot.position.set(zx, zy + 0.001, zz);
-      this.scene.add(dot);
-      this.meshes.push(dot);
-    }
-  }
-
-  // ─── SUBMERSIBLE: Central scoring structure ───
-  private buildSubmersible() {
-    const group = new THREE.Group();
-    const subW = 0.60;
-    const subD = 0.60;
-    const subH = 0.10;
-
-    // Raised platform
-    const platformMat = new THREE.MeshPhysicalMaterial({
-      color: 0x334455,
-      roughness: 0.3,
-      metalness: 0.6,
-      clearcoat: 0.5,
-      clearcoatRoughness: 0.2,
-      envMapIntensity: 0.7,
-    });
-    const platform = new THREE.Mesh(
-      new THREE.BoxGeometry(subW, subH, subD),
-      platformMat
-    );
-    platform.position.y = subH / 2;
-    platform.receiveShadow = true;
-    platform.castShadow = true;
-    group.add(platform);
-
-    // Edge trim (colored border around the platform)
-    const trimMat = new THREE.MeshStandardMaterial({
-      color: 0xffaa00,
-      emissive: 0xffaa00,
-      emissiveIntensity: 0.3,
-    });
-    const trimThickness = 0.015;
-
-    // Front and back trims
-    for (const sign of [-1, 1]) {
-      const trim = new THREE.Mesh(
-        new THREE.BoxGeometry(subW + trimThickness * 2, subH + 0.005, trimThickness),
-        trimMat
-      );
-      trim.position.set(0, subH / 2, sign * (subD / 2 + trimThickness / 2));
-      group.add(trim);
-    }
-    // Left and right trims
-    for (const sign of [-1, 1]) {
-      const trim = new THREE.Mesh(
-        new THREE.BoxGeometry(trimThickness, subH + 0.005, subD),
-        trimMat
-      );
-      trim.position.set(sign * (subW / 2 + trimThickness / 2), subH / 2, 0);
-      group.add(trim);
-    }
-
-    // Basket/net area on top (wire-frame look)
-    const basketMat = new THREE.MeshStandardMaterial({
-      color: 0x888888,
-      wireframe: true,
-      transparent: true,
-      opacity: 0.4,
-    });
-    const basket = new THREE.Mesh(
-      new THREE.BoxGeometry(subW * 0.7, 0.08, subD * 0.7),
-      basketMat
-    );
-    basket.position.y = subH + 0.04;
-    group.add(basket);
-
-    // Corner posts on the submersible
-    const postMat = new THREE.MeshPhysicalMaterial({
-      color: 0x666666,
-      roughness: 0.15,
-      metalness: 0.9,
-      clearcoat: 0.5,
-      envMapIntensity: 0.8,
-    });
-    for (const sx of [-1, 1]) {
-      for (const sz of [-1, 1]) {
-        const post = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.015, 0.015, subH + 0.12, 8),
-          postMat
+    for (let r = 0; r < 4; r++) {
+      for (let c = 0; c < 4; c++) {
+        const cell = new THREE.Mesh(
+          new THREE.PlaneGeometry(cellSize * 0.95, cellSize * 0.95),
+          pattern[r][c] ? blackMat : whiteMat
         );
-        post.position.set(sx * subW / 2, (subH + 0.12) / 2, sz * subD / 2);
-        post.castShadow = true;
-        group.add(post);
-
-        // Small glowing top on each post
-        const topBall = new THREE.Mesh(
-          new THREE.SphereGeometry(0.02, 12, 12),
-          new THREE.MeshStandardMaterial({
-            color: 0xffaa00,
-            emissive: 0xffaa00,
-            emissiveIntensity: 0.8,
-          })
-        );
-        topBall.position.set(sx * subW / 2, subH + 0.12 + 0.02, sz * subD / 2);
-        group.add(topBall);
+        cell.position.set((c - 1.5) * cellSize, (1.5 - r) * cellSize, 0.001);
+        group.add(cell);
       }
     }
 
-    group.position.set(0, 0, 0); // center of field
-    this.scene.add(group);
-    this.meshes.push(group);
-
-    // Physics body for the submersible platform
-    const subBody = new CANNON.Body({
-      type: CANNON.Body.STATIC,
-      shape: new CANNON.Box(new CANNON.Vec3(subW / 2, subH / 2, subD / 2)),
-    });
-    subBody.position.set(0, subH / 2, 0);
-    this.world.addBody(subBody);
-    this.bodies.push(subBody);
+    group.rotation.y = rotY;
+    group.position.set(x, y, z);
+    parent.add(group);
   }
 
+  // ─── GEOMETRY HELPERS ───
+  private makeBox(x: number, y: number, z: number, w: number, h: number, d: number, mat: THREE.Material): THREE.Mesh {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    mesh.position.set(x, y, z);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    return mesh;
+  }
+
+  // ─── UPDATE ───
   update(dt: number) {
     this.elapsedTime += dt;
     this.gamePieces.update(dt);
-
-    // Pulse obelisk glow caps
-    for (const cap of this.obeliskGlows) {
-      const mat = cap.material as THREE.MeshStandardMaterial;
-      mat.emissiveIntensity = 0.8 + Math.sin(this.elapsedTime * 2.5) * 0.4;
-    }
-
-    // Pulse scoring zone rings
-    for (const ring of this.zoneRings) {
-      const mat = ring.material as THREE.MeshStandardMaterial;
-      mat.emissiveIntensity = 0.3 + Math.sin(this.elapsedTime * 1.8 + 1.0) * 0.2;
-    }
   }
 
-  reset() { this.gamePieces.reset(); }
+  reset() {
+    this.gamePieces.reset();
+  }
 }

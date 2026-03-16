@@ -73,7 +73,7 @@ export class Robot {
   private wheelSpeed = 0;
 
   // State
-  initialPos = new THREE.Vector3(0.5, CHASSIS_Y, 1.2);
+  initialPos = new THREE.Vector3(0.6096, CHASSIS_Y, -1.6028);
   speed = 0;
   turnRate = 0;
   boosting = false;
@@ -130,6 +130,8 @@ export class Robot {
       angularDamping: 0.95,
     });
     this.chassisBody.position.set(this.initialPos.x, this.initialPos.y, this.initialPos.z);
+    this.chassisBody.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), Math.PI);
+    this.chassisMesh.rotation.y = Math.PI;
     this.world.addBody(this.chassisBody);
   }
 
@@ -843,9 +845,9 @@ export class Robot {
     this.chassisBody.position.set(this.initialPos.x, this.initialPos.y, this.initialPos.z);
     this.chassisBody.velocity.setZero();
     this.chassisBody.angularVelocity.setZero();
-    this.chassisBody.quaternion.set(0, 0, 0, 1);
+    this.chassisBody.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), Math.PI);
     this.chassisMesh.position.copy(this.initialPos);
-    this.chassisMesh.quaternion.set(0, 0, 0, 1);
+    this.chassisMesh.rotation.set(0, Math.PI, 0);
     this.shooterAngle = 0.4;
     this.shooterYaw = 0;
 

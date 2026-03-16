@@ -71,23 +71,40 @@
         <div id="match-phase">TELEOP</div>
       </div>
       <div id="controls-panel" class="panel hidden">
-        <h3>Controls</h3>
+        <div class="controls-header">
+          <h3>Controls</h3>
+          <button id="btn-close-controls" class="controls-close">&times;</button>
+        </div>
         <div class="control-group">
-          <h4>Keyboard</h4>
-          <p>WASD — Drive</p>
-          <p>Arrow Keys — Turret</p>
-          <p>Q/E — Intake In/Out</p>
-          <p>Space — Shoot</p>
-          <p>Shift — Boost</p>
-          <p>R — Reset Robot</p>
-          <p>F — Toggle Freecam</p>
-          <p>1/2/3 — Camera Presets</p>
+          <h4>Movement</h4>
+          <p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> — Drive / Strafe</p>
+          <p><kbd>Q</kbd><kbd>E</kbd> — Turn Left / Right</p>
+          <p><kbd>Shift</kbd> — Boost</p>
+        </div>
+        <div class="control-group">
+          <h4>Actions</h4>
+          <p><kbd>Space</kbd> — Shoot</p>
+          <p><kbd>Z</kbd><kbd>X</kbd> — Intake In / Out</p>
+          <p><kbd>&uarr;</kbd><kbd>&darr;</kbd> — Shooter Pitch</p>
+          <p><kbd>&larr;</kbd><kbd>&rarr;</kbd> — Shooter Yaw</p>
+        </div>
+        <div class="control-group">
+          <h4>Camera</h4>
+          <p><kbd>F</kbd> — Toggle Freecam</p>
+          <p><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> — Camera Presets</p>
+          <p>Mouse Drag — Orbit Camera</p>
+          <p>Scroll — Zoom In / Out</p>
+        </div>
+        <div class="control-group">
+          <h4>Other</h4>
+          <p><kbd>R</kbd> — Reset Robot</p>
+          <p><kbd>H</kbd> — Toggle This Panel</p>
         </div>
         <div class="control-group">
           <h4>Gamepad</h4>
-          <p>Left Stick — Drive</p>
-          <p>Right Stick — Turn/Turret</p>
-          <p>LB/RB — Intake</p>
+          <p>Left Stick — Drive / Strafe</p>
+          <p>Right Stick — Turn / Pitch</p>
+          <p>LB / RB — Intake In / Out</p>
           <p>A — Shoot</p>
           <p>B — Boost</p>
         </div>
