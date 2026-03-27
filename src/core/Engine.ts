@@ -48,7 +48,7 @@ export class Engine {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.5;
+    this.renderer.toneMappingExposure = 1.0;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 
     // Scene
@@ -101,7 +101,7 @@ export class Engine {
         bottomColor: { value: new THREE.Color(0x2a1a0a) },
         lightDir: { value: new THREE.Vector3(0.5, 0.8, 0.3).normalize() },
         lightColor: { value: new THREE.Color(0xffeedd) },
-        lightIntensity: { value: 3.0 },
+        lightIntensity: { value: 1.5 },
       },
       vertexShader: `
         varying vec3 vWorldPosition;
@@ -165,18 +165,18 @@ export class Engine {
 
   private setupLighting() {
     // Ambient
-    const ambient = new THREE.AmbientLight(0x808090, 1.2);
+    const ambient = new THREE.AmbientLight(0x808090, 0.8);
     this.scene.add(ambient);
 
     // Hemisphere
-    const hemi = new THREE.HemisphereLight(0xc0d8f0, 0x6a5a4e, 1.0);
+    const hemi = new THREE.HemisphereLight(0xc0d8f0, 0x6a5a4e, 0.6);
     this.scene.add(hemi);
 
     // Main directional (key light)
-    const dirLight = new THREE.DirectionalLight(0xfff4e8, 3.0);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 2.0);
     dirLight.position.set(8, 18, 5);
     dirLight.castShadow = true;
-    dirLight.shadow.mapSize.set(4096, 4096);
+    dirLight.shadow.mapSize.set(2048, 2048);
     dirLight.shadow.camera.near = 0.5;
     dirLight.shadow.camera.far = 50;
     dirLight.shadow.camera.left = -12;
@@ -189,33 +189,29 @@ export class Engine {
     this.scene.add(dirLight);
 
     // Fill light
-    const fillLight = new THREE.DirectionalLight(0x88aadd, 1.2);
+    const fillLight = new THREE.DirectionalLight(0x88aadd, 0.5);
     fillLight.position.set(-6, 10, -4);
     this.scene.add(fillLight);
 
     // Rim / back light
-    const rimLight = new THREE.DirectionalLight(0xffd8a0, 0.8);
+    const rimLight = new THREE.DirectionalLight(0xffd8a0, 0.4);
     rimLight.position.set(-3, 6, 8);
     this.scene.add(rimLight);
 
-    // Overhead spot lights
-    const spotPositions: [number, number, number, boolean][] = [
-      [-3, 12, -3, true], [3, 12, -3, false], [-3, 12, 3, false], [3, 12, 3, true],
+    // Overhead spot lights — no shadow casting (directional handles it)
+    const spotPositions: [number, number, number][] = [
+      [-3, 12, -3], [3, 12, -3], [-3, 12, 3], [3, 12, 3],
     ];
-    for (const [x, y, z, castShadow] of spotPositions) {
-      const spot = new THREE.SpotLight(0xfff8f0, 3.0, 30, Math.PI / 4, 0.4, 0.8);
+    for (const [x, y, z] of spotPositions) {
+      const spot = new THREE.SpotLight(0xfff8f0, 1.5, 30, Math.PI / 4, 0.4, 0.8);
       spot.position.set(x, y, z);
       spot.target.position.set(0, 0, 0);
-      spot.castShadow = castShadow;
-      if (castShadow) {
-        spot.shadow.mapSize.set(2048, 2048);
-        spot.shadow.bias = -0.0001;
-      }
+      spot.castShadow = false;
       this.scene.add(spot);
       this.scene.add(spot.target);
 
       const bulb = new THREE.Mesh(
-        new THREE.SphereGeometry(0.08, 16, 16),
+        new THREE.SphereGeometry(0.08, 8, 8),
         new THREE.MeshStandardMaterial({
           color: 0xffffee,
           emissive: 0xffffee,

@@ -72,8 +72,8 @@ export class Robot {
   private wheels: THREE.Group[] = [];
   private wheelSpeed = 0;
 
-  // State
-  initialPos = new THREE.Vector3(0.6096, CHASSIS_Y, -1.6028);
+  // State — Y offset of 0.025 accounts for tile surface above physics origin
+  initialPos = new THREE.Vector3(0.6096, CHASSIS_Y + 0.025, -1.6028);
   speed = 0;
   turnRate = 0;
   boosting = false;
@@ -119,16 +119,20 @@ export class Robot {
     this.chassisMesh.position.copy(this.initialPos);
     this.scene.add(this.chassisMesh);
 
-    // Physics body
+    // Physics body — compound of spheres for sphere-trimesh collision.
     const halfW = FRAME_W / 2;
     const halfH = (CHAN_SIZE + 0.01) / 2;
     const halfD = FRAME_D / 2;
+    const SR = 0.04;
     this.chassisBody = new CANNON.Body({
       mass: 14,
-      shape: new CANNON.Box(new CANNON.Vec3(halfW, halfH, halfD)),
       linearDamping: 0.9,
       angularDamping: 0.95,
     });
+    // 4 bottom corners + 1 center = 5 spheres (sufficient for floor + wall contact)
+    for (const [sx, sz] of [[-halfW+SR, -halfD+SR], [halfW-SR, -halfD+SR], [-halfW+SR, halfD-SR], [halfW-SR, halfD-SR], [0, 0]]) {
+      this.chassisBody.addShape(new CANNON.Sphere(SR), new CANNON.Vec3(sx, 0, sz));
+    }
     this.chassisBody.position.set(this.initialPos.x, this.initialPos.y, this.initialPos.z);
     this.chassisBody.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), Math.PI);
     this.chassisMesh.rotation.y = Math.PI;
