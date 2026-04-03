@@ -4,7 +4,6 @@ import { Field } from '../field/Field';
 import { Robot } from '../robot/Robot';
 import { CameraController } from '../camera/CameraController';
 import { InputManager } from '../input/InputManager';
-import { UIManager } from '../ui/UIManager';
 import { CodeRunner } from '../code-runner/CodeRunner';
 
 export class Engine {
@@ -16,7 +15,6 @@ export class Engine {
   field: Field;
   robot: Robot;
   input: InputManager;
-  ui: UIManager;
   codeRunner: CodeRunner;
 
   // Environment map for reflections
@@ -76,7 +74,6 @@ export class Engine {
     this.field = new Field(this.scene, this.world, this.envMap);
     this.robot = new Robot(this.scene, this.world, useCustomModel, this.envMap);
     this.cameraController = new CameraController(this.camera, this.renderer.domElement, this.robot);
-    this.ui = new UIManager(this);
     this.codeRunner = new CodeRunner(this);
 
     this.setupLighting();
@@ -325,9 +322,6 @@ export class Engine {
       // Field
       this.field.update(dt);
     }
-
-    // UI
-    this.ui.update();
 
     // Render directly
     this.renderer.render(this.scene, this.camera);
