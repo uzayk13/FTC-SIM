@@ -76,6 +76,38 @@ export class InputManager {
 
   update() {
     this.pollGamepad();
+    this.applyKeyboardToGamepad();
+  }
+
+  /**
+   * Map keyboard keys onto gamepad1 state so that user OpMode code
+   * reading gamepad1.left_stick_y etc. works with keyboard input.
+   */
+  private applyKeyboardToGamepad() {
+    // Only apply keyboard to gamepad1 if no real gamepad is providing input
+    // (real gamepad values take priority)
+    const gp = this.gamepad1;
+
+    // Sticks — keyboard overrides if real gamepad axes are zero
+    const kbForward = (this.keys.has('KeyW') ? 1 : 0) - (this.keys.has('KeyS') ? 1 : 0);
+    const kbStrafe = (this.keys.has('KeyD') ? 1 : 0) - (this.keys.has('KeyA') ? 1 : 0);
+    const kbTurn = (this.keys.has('KeyE') ? 1 : 0) - (this.keys.has('KeyQ') ? 1 : 0);
+
+    if (Math.abs(gp.left_stick_y) < 0.01) gp.left_stick_y = kbForward;
+    if (Math.abs(gp.left_stick_x) < 0.01) gp.left_stick_x = kbStrafe;
+    if (Math.abs(gp.right_stick_x) < 0.01) gp.right_stick_x = kbTurn;
+
+    // Buttons
+    if (!gp.a) gp.a = this.keys.has('Space');
+    if (!gp.b) gp.b = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
+    if (!gp.left_bumper) gp.left_bumper = this.keys.has('KeyZ');
+    if (!gp.right_bumper) gp.right_bumper = this.keys.has('KeyX');
+    if (!gp.dpad_up) gp.dpad_up = this.keys.has('ArrowUp');
+    if (!gp.dpad_down) gp.dpad_down = this.keys.has('ArrowDown');
+    if (!gp.dpad_left) gp.dpad_left = this.keys.has('ArrowLeft');
+    if (!gp.dpad_right) gp.dpad_right = this.keys.has('ArrowRight');
+    if (!gp.x) gp.x = this.keys.has('KeyR');
+    if (!gp.y) gp.y = this.keys.has('KeyF');
   }
 
   private pollGamepad() {

@@ -9,6 +9,8 @@ interface OpMode {
   stop?(robot: any): void;
   start?(): void;
   init_loop?(): void;
+  runOpMode?(): Promise<void>;
+  _isLinear?: boolean;
 }
 
 export interface ProjectFile {
@@ -22,6 +24,8 @@ export class CodeRunner {
   private opMode: OpMode | null = null;
   private ftcRuntime: FtcRuntimeContext | null = null;
   private outputEl: HTMLElement | null;
+  private _linearRunning = false; // True while a LinearOpMode's runOpMode() is executing
+  private _stopRequested = false;
 
   constructor(engine: Engine) {
     this.engine = engine;
@@ -247,12 +251,29 @@ ${polyfills}
         stop() {}
       }
       class LinearOpMode extends OpMode {
-        waitForStart() {}
-        opModeIsActive() { return true; }
-        isStopRequested() { return false; }
-        isStarted() { return true; }
-        sleep(ms) {}
-        idle() {}
+        _isLinear = true;
+        _stopRequested = false;
+        _started = false;
+
+        waitForStart() {
+          this._started = true;
+          // Returns a promise that resolves next frame (CodeRunner drives this)
+          return new Promise(resolve => { this._waitResolve = resolve; });
+        }
+        opModeIsActive() { return this._started && !this._stopRequested; }
+        isStopRequested() { return this._stopRequested; }
+        isStarted() { return this._started; }
+        sleep(ms) {
+          return new Promise(resolve => {
+            this._sleepResolve = resolve;
+            this._sleepUntil = performance.now() + ms;
+          });
+        }
+        idle() {
+          return new Promise(resolve => {
+            this._idleResolve = resolve;
+          });
+        }
       }
       class IterativeOpMode extends OpMode {}
       class CommandOpMode extends LinearOpMode {
@@ -288,52 +309,80 @@ ${polyfills}
       const hasStop = typeof instance.stop === 'function';
       const hasStart = typeof instance.start === 'function';
       const hasInitLoop = typeof instance.init_loop === 'function';
+      const hasRunOpMode = typeof instance.runOpMode === 'function';
+      const isLinear = instance._isLinear === true;
 
-      if (!hasInit && !hasLoop) {
-        this.log(`Error: ${className} has no init() or loop() method.`);
-        this.log('After transpilation, the class must have at least init() or loop().');
+      if (!hasInit && !hasLoop && !hasRunOpMode) {
+        this.log(`Error: ${className} has no init(), loop(), or runOpMode() method.`);
+        this.log('After transpilation, the class must have at least one lifecycle method.');
         return;
       }
 
       this.opMode = instance;
       const methods = [
         hasInit && 'init', hasInitLoop && 'init_loop', hasStart && 'start',
-        hasLoop && 'loop', hasStop && 'stop',
+        hasLoop && 'loop', hasRunOpMode && 'runOpMode', hasStop && 'stop',
       ].filter(Boolean).join(', ');
-      this.log(`Compiled OK. Methods: ${methods}`);
+      this.log(`Compiled OK. Methods: ${methods}${isLinear ? ' (LinearOpMode)' : ''}`);
 
-      // Run init
-      if (this.opMode!.init) {
-        try {
-          // Pass runtime objects that FTC code expects on `this`
-          (instance as any).hardwareMap = rt.hardwareMap;
-          (instance as any).telemetry = rt.telemetry;
-          (instance as any).gamepad1 = rt.gamepad1;
-          (instance as any).gamepad2 = rt.gamepad2;
-          (instance as any).runtime = rt.runtime;
+      // Inject runtime objects onto instance
+      (instance as any).hardwareMap = rt.hardwareMap;
+      (instance as any).telemetry = rt.telemetry;
+      (instance as any).gamepad1 = rt.gamepad1;
+      (instance as any).gamepad2 = rt.gamepad2;
+      (instance as any).runtime = rt.runtime;
 
-          this.opMode!.init(rt.hardwareMap);
-          this.log('init() executed.');
-        } catch (e: any) {
-          this.log(`Error in init(): ${e.message}`);
-          if (e.stack) {
-            const line = extractLineFromStack(e.stack);
-            if (line) this.log(`  at line ~${line}`);
+      if (isLinear && hasRunOpMode) {
+        // LinearOpMode: run runOpMode() as async, it will yield on
+        // waitForStart(), sleep(), idle()
+        this.running = true;
+        this._linearRunning = true;
+        this._stopRequested = false;
+        this.log('LinearOpMode starting runOpMode()...');
+
+        instance.runOpMode!().then(() => {
+          this.log('runOpMode() completed.');
+          this._linearRunning = false;
+          this.stop();
+        }).catch((e: any) => {
+          if (e?.message === '__opmode_stopped__') {
+            this.log('OpMode stopped.');
+          } else {
+            this.log(`Runtime error in runOpMode(): ${e.message}`);
+            if (e.stack) {
+              const line = extractLineFromStack(e.stack);
+              if (line) this.log(`  at line ~${line}`);
+            }
+          }
+          this._linearRunning = false;
+          this.running = false;
+        });
+      } else {
+        // Standard iterative OpMode
+        if (hasInit) {
+          try {
+            this.opMode!.init(rt.hardwareMap);
+            this.log('init() executed.');
+          } catch (e: any) {
+            this.log(`Error in init(): ${e.message}`);
+            if (e.stack) {
+              const line = extractLineFromStack(e.stack);
+              if (line) this.log(`  at line ~${line}`);
+            }
           }
         }
-      }
 
-      // Run start() if present
-      if (this.opMode!.start) {
-        try {
-          this.opMode!.start();
-        } catch (e: any) {
-          this.log(`Error in start(): ${e.message}`);
+        if (hasStart) {
+          try {
+            this.opMode!.start();
+          } catch (e: any) {
+            this.log(`Error in start(): ${e.message}`);
+          }
         }
-      }
 
-      this.running = true;
-      this.log('OpMode RUNNING.');
+        this.running = true;
+        this.log('OpMode RUNNING.');
+      }
     } catch (e: any) {
       let msg = e.message || String(e);
       if (e instanceof SyntaxError) {
@@ -353,13 +402,55 @@ ${polyfills}
     if (!this.running || !this.opMode) return;
 
     const rt = this.ftcRuntime;
+    const instance = this.opMode as any;
 
     // Update gamepad references (they might change each frame)
     if (rt) {
-      (this.opMode as any).gamepad1 = rt.gamepad1;
-      (this.opMode as any).gamepad2 = rt.gamepad2;
+      instance.gamepad1 = rt.gamepad1;
+      instance.gamepad2 = rt.gamepad2;
     }
 
+    // LinearOpMode: drive blocking resolves each frame
+    if (this._linearRunning && instance._isLinear) {
+      // Propagate stop
+      if (this._stopRequested) {
+        instance._stopRequested = true;
+      }
+
+      // Resolve waitForStart() — always resolve immediately (sim doesn't have a separate start phase)
+      if (instance._waitResolve) {
+        const resolve = instance._waitResolve;
+        instance._waitResolve = null;
+        instance._started = true;
+        resolve();
+      }
+
+      // Resolve sleep() when time has elapsed
+      if (instance._sleepResolve && instance._sleepUntil) {
+        if (performance.now() >= instance._sleepUntil) {
+          const resolve = instance._sleepResolve;
+          instance._sleepResolve = null;
+          instance._sleepUntil = null;
+          resolve();
+        }
+      }
+
+      // Resolve idle() — yields one frame then resumes
+      if (instance._idleResolve) {
+        const resolve = instance._idleResolve;
+        instance._idleResolve = null;
+        resolve();
+      }
+
+      // Sync motors each frame for LinearOpMode too
+      if (rt) {
+        rt.telemetry.update();
+        rt.syncMotors();
+      }
+      return;
+    }
+
+    // Standard iterative OpMode
     if (this.opMode.loop) {
       try {
         this.opMode.loop(
@@ -385,6 +476,17 @@ ${polyfills}
   }
 
   stop() {
+    this._stopRequested = true;
+
+    // Unblock any pending LinearOpMode awaits so it can exit
+    if (this.opMode) {
+      const instance = this.opMode as any;
+      instance._stopRequested = true;
+      if (instance._waitResolve) { instance._waitResolve(); instance._waitResolve = null; }
+      if (instance._sleepResolve) { instance._sleepResolve(); instance._sleepResolve = null; }
+      if (instance._idleResolve) { instance._idleResolve(); instance._idleResolve = null; }
+    }
+
     if (this.running && this.opMode?.stop) {
       try {
         this.opMode.stop(this.ftcRuntime?.hardwareMap ?? null);
@@ -393,6 +495,7 @@ ${polyfills}
       }
     }
     this.running = false;
+    this._linearRunning = false;
     this.opMode = null;
     this.ftcRuntime = null;
     this.log('OpMode stopped.');

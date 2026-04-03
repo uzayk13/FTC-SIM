@@ -93,7 +93,12 @@ export function createFtcRuntime(engine: Engine): FtcRuntimeContext {
     getCurrentPosition() { return this._currentPosition; }
     setZeroPowerBehavior(b: string) { this._zeroPowerBehavior = b; }
     getZeroPowerBehavior() { return this._zeroPowerBehavior; }
-    isBusy() { return false; }
+    isBusy() {
+      if (this._mode === DcMotorRunMode.RUN_TO_POSITION) {
+        return Math.abs(this._targetPosition - this._currentPosition) > 10;
+      }
+      return false;
+    }
     // DcMotorEx methods
     setVelocity(v: number, _unit?: string) { this._velocity = v; this._power = v / 2800; }
     getVelocity(_unit?: string) { return this._velocity; }
@@ -921,7 +926,7 @@ export function createFtcRuntime(engine: Engine): FtcRuntimeContext {
     resetEncoder() { this._dcMotor.setMode(DcMotorRunMode.STOP_AND_RESET_ENCODER); }
     getCurrentPosition() { return this._dcMotor.getCurrentPosition(); }
     setTargetPosition(p: number) { this._dcMotor.setTargetPosition(p); }
-    isBusy() { return false; }
+    isBusy() { return this._dcMotor.isBusy(); }
     setVeloCoefficients(_kP: number, _kI: number, _kD: number, _kF?: number) {}
     setFeedforwardCoefficients(_kS: number, _kV: number, _kA?: number) {}
     setInverted(inverted: boolean) {
@@ -1221,41 +1226,79 @@ export function createFtcRuntime(engine: Engine): FtcRuntimeContext {
   // ========================================================
   // Motor → Robot sync
   // ========================================================
-  const LEFT_PATTERNS = ['frontleft', 'fl', 'leftfront', 'lf', 'leftmotor', 'left', 'backleft', 'bl', 'leftback', 'lb', 'motorfl', 'motorbl', 'leftdrive', 'frontleftmotor', 'backleftmotor', 'motor0', 'motor2'];
-  const RIGHT_PATTERNS = ['frontright', 'fr', 'rightfront', 'rf', 'rightmotor', 'right', 'backright', 'br', 'rightback', 'rb', 'motorfr', 'motorbr', 'rightdrive', 'frontrightmotor', 'backrightmotor', 'motor1', 'motor3'];
+  // Mecanum motor name patterns
+  const FL_PATTERNS = ['frontleft', 'fl', 'leftfront', 'lf', 'motorfl', 'frontleftmotor', 'motor0'];
+  const FR_PATTERNS = ['frontright', 'fr', 'rightfront', 'rf', 'motorfr', 'frontrightmotor', 'motor1'];
+  const BL_PATTERNS = ['backleft', 'bl', 'leftback', 'lb', 'motorbl', 'backleftmotor', 'motor2'];
+  const BR_PATTERNS = ['backright', 'br', 'rightback', 'rb', 'motorbr', 'backrightmotor', 'motor3'];
+  // Fallback: generic left/right (tank drive)
+  const LEFT_PATTERNS = ['leftmotor', 'left', 'leftdrive'];
+  const RIGHT_PATTERNS = ['rightmotor', 'right', 'rightdrive'];
   const SHOOTER_PATTERNS = ['shooter', 'launcher', 'flywheel', 'shoot', 'catapult', 'outtake'];
   const INTAKE_PATTERNS = ['intake', 'collector', 'roller', 'sweeper'];
 
+  // goBILDA 5203-2402-0019 Yellow Jacket: 537.7 PPR (19.2:1 ratio)
+  const TICKS_PER_REV = 537.7;
+  const WHEEL_CIRCUMFERENCE = Math.PI * 0.096; // 96mm mecanum wheel
+
   function syncMotors() {
+    let flPower = 0, frPower = 0, blPower = 0, brPower = 0;
+    let flFound = false, frFound = false, blFound = false, brFound = false;
     let leftPower = 0, rightPower = 0, leftCount = 0, rightCount = 0;
     let shooterPower = 0, intakePower = 0;
 
     for (const [, device] of allDevices) {
       if (!(device instanceof DcMotorStub)) continue;
       const name = device._name.toLowerCase().replace(/[\s_-]/g, '');
+      const power = device.effectivePower;
 
-      if (LEFT_PATTERNS.some(p => name.includes(p))) {
-        leftPower += device.effectivePower;
-        leftCount++;
+      // Try mecanum (4-wheel) first
+      if (FL_PATTERNS.some(p => name.includes(p))) {
+        flPower = power; flFound = true;
+      } else if (FR_PATTERNS.some(p => name.includes(p))) {
+        frPower = power; frFound = true;
+      } else if (BL_PATTERNS.some(p => name.includes(p))) {
+        blPower = power; blFound = true;
+      } else if (BR_PATTERNS.some(p => name.includes(p))) {
+        brPower = power; brFound = true;
+      } else if (LEFT_PATTERNS.some(p => name.includes(p))) {
+        leftPower += power; leftCount++;
       } else if (RIGHT_PATTERNS.some(p => name.includes(p))) {
-        rightPower += device.effectivePower;
-        rightCount++;
+        rightPower += power; rightCount++;
       } else if (SHOOTER_PATTERNS.some(p => name.includes(p))) {
-        shooterPower = device.effectivePower;
+        shooterPower = power;
       } else if (INTAKE_PATTERNS.some(p => name.includes(p))) {
-        intakePower = device.effectivePower;
+        intakePower = power;
       }
     }
 
-    if (leftCount > 0) leftPower /= leftCount;
-    if (rightCount > 0) rightPower /= rightCount;
+    const hasMecanum = flFound || frFound || blFound || brFound;
 
-    // If we found drive motors, use them; otherwise fall back to nothing
-    if (leftCount > 0 || rightCount > 0) {
+    if (hasMecanum) {
+      // Mecanum inverse kinematics:
+      //   FL = forward + strafe + turn
+      //   FR = forward - strafe - turn
+      //   BL = forward - strafe + turn
+      //   BR = forward + strafe - turn
+      // Solve for forward, strafe, turn:
+      const forward = (flPower + frPower + blPower + brPower) / 4;
+      const strafe  = (flPower - frPower - blPower + brPower) / 4;
+      const turn    = (flPower - frPower + blPower - brPower) / 4;
+
+      engine.robot.setDrivePower(
+        Math.max(-1, Math.min(1, forward)),
+        Math.max(-1, Math.min(1, strafe)),
+        Math.max(-1, Math.min(1, turn))
+      );
+    } else if (leftCount > 0 || rightCount > 0) {
+      // Tank drive fallback
+      if (leftCount > 0) leftPower /= leftCount;
+      if (rightCount > 0) rightPower /= rightCount;
       const forward = (leftPower + rightPower) / 2;
       const turn = (rightPower - leftPower) / 2;
       engine.robot.setDrivePower(
         Math.max(-1, Math.min(1, forward)),
+        0,
         Math.max(-1, Math.min(1, turn))
       );
     }
@@ -1270,10 +1313,30 @@ export function createFtcRuntime(engine: Engine): FtcRuntimeContext {
       engine.robot.intakeOut();
     }
 
-    // Update encoder positions (simulated)
+    // Update encoder positions based on actual robot velocity
+    const robotVel = engine.robot.chassisBody.velocity;
+    const speed = Math.sqrt(robotVel.x ** 2 + robotVel.z ** 2); // m/s
+    const ticksPerSecond = (speed / WHEEL_CIRCUMFERENCE) * TICKS_PER_REV;
+    const ticksThisFrame = ticksPerSecond / 60; // at 60fps
+
     for (const [, device] of allDevices) {
-      if (device instanceof DcMotorStub) {
-        device._currentPosition += Math.round(device._power * 28); // ~28 ticks per frame at 60fps
+      if (!(device instanceof DcMotorStub)) continue;
+
+      // RUN_TO_POSITION: auto-drive toward target
+      if (device._mode === DcMotorRunMode.RUN_TO_POSITION) {
+        const error = device._targetPosition - device._currentPosition;
+        if (Math.abs(error) > 10) {
+          // Drive toward target at the set power magnitude
+          const dir = Math.sign(error);
+          device._power = Math.abs(device._power) * dir;
+        } else {
+          device._power = 0;
+        }
+      }
+
+      // Accumulate encoder ticks proportional to power and actual robot speed
+      if (Math.abs(device._power) > 0.01) {
+        device._currentPosition += Math.round(device._power * ticksThisFrame);
       }
     }
   }

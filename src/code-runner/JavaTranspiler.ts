@@ -255,9 +255,9 @@ export function transpileJava(source: string): TranspileResult {
 
   // ── Handle @Override removal (already done above) ──
 
-  // ── Convert LinearOpMode/CommandOpMode runOpMode → init/loop ──
+  // ── Convert LinearOpMode/CommandOpMode runOpMode → async with await ──
   if (opModeType === 'linearopmode' || opModeType === 'commandopmode') {
-    code = convertRunOpMode(code);
+    code = convertRunOpModeAsync(code);
   }
 
   // ── Find class name ──
@@ -315,90 +315,47 @@ export function stripTypeScript(code: string): string {
 }
 
 /**
- * Convert runOpMode() body into init() + loop() methods.
+ * Convert runOpMode() to an async method and add `await` before blocking calls.
+ * This preserves the sequential structure of LinearOpMode code instead of
+ * splitting it into init/loop.
  */
-function convertRunOpMode(code: string): string {
+function convertRunOpModeAsync(code: string): string {
   const methodStart = code.search(/runOpMode\s*\(\s*\)\s*\{/);
   if (methodStart === -1) return code;
 
-  const braceStart = code.indexOf('{', methodStart);
-  if (braceStart === -1) return code;
-
-  // Find matching closing brace
-  let depth = 1;
-  let i = braceStart + 1;
-  while (i < code.length && depth > 0) {
-    if (code[i] === '{') depth++;
-    else if (code[i] === '}') depth--;
-    i++;
-  }
-  const methodBody = code.slice(braceStart + 1, i - 1);
-
-  // Split on waitForStart()
-  const waitIdx = methodBody.indexOf('waitForStart');
-  let initBody: string;
-  let loopBody: string;
-
-  if (waitIdx !== -1) {
-    initBody = methodBody.slice(0, waitIdx);
-    let afterWait = methodBody.slice(waitIdx);
-    afterWait = afterWait.replace(/waitForStart\s*\(\s*\)\s*;?\s*/, '');
-    loopBody = afterWait;
-  } else {
-    initBody = '';
-    loopBody = methodBody;
-  }
-
-  // Extract while(opModeIsActive()) loop body
-  const whileMatch = loopBody.match(
-    /while\s*\(\s*(?:opModeIsActive\s*\(\s*\)|!isStopRequested\s*\(\s*\)|true)\s*(?:&&[^)]+)?\s*\)\s*\{/
+  // Make runOpMode async
+  code = code.replace(
+    /runOpMode\s*\(\s*\)\s*\{/,
+    'async runOpMode() {'
   );
-  if (whileMatch) {
-    const whileStart = loopBody.indexOf(whileMatch[0]);
-    const bodyStart = loopBody.indexOf('{', whileStart);
-    let d = 1;
-    let j = bodyStart + 1;
-    while (j < loopBody.length && d > 0) {
-      if (loopBody[j] === '{') d++;
-      else if (loopBody[j] === '}') d--;
-      j++;
-    }
-    // Code before the while loop goes into init
-    const preWhile = loopBody.slice(0, whileStart).trim();
-    if (preWhile) initBody += '\n' + preWhile;
-    loopBody = loopBody.slice(bodyStart + 1, j - 1);
-  }
 
-  // Check for CommandOpMode's scheduler.run() pattern
-  // If loop body contains scheduler.run(), keep it as-is
-  const hasSchedulerRun = /scheduler\.run\s*\(\s*\)/.test(loopBody);
+  // Add `await` before blocking calls that return promises
+  // waitForStart()
+  code = code.replace(
+    /(?<!await\s)(?:this\.)?waitForStart\s*\(\s*\)/g,
+    'await this.waitForStart()'
+  );
 
-  const before = code.slice(0, methodStart);
-  const after = code.slice(i);
+  // sleep(ms)
+  code = code.replace(
+    /(?<!await\s)(?:this\.)?sleep\s*\(([^)]+)\)/g,
+    'await this.sleep($1)'
+  );
 
-  let replacement: string;
-  if (hasSchedulerRun) {
-    replacement = `
-    init(robot) {
-      // Provide hardwareMap, telemetry, gamepad access via this
-      ${initBody.trim()}
-    }
-    loop(robot, gamepad1, gamepad2) {
-      ${loopBody.trim()}
-    }
-    `;
-  } else {
-    replacement = `
-    init(robot) {
-      ${initBody.trim()}
-    }
-    loop(robot, gamepad1, gamepad2) {
-      ${loopBody.trim()}
-    }
-    `;
-  }
+  // idle()
+  code = code.replace(
+    /(?<!await\s)(?:this\.)?idle\s*\(\s*\)/g,
+    'await this.idle()'
+  );
 
-  return `${before}${replacement}${after}`;
+  // Convert while(opModeIsActive()) loops — inject an idle() yield per iteration
+  // so the loop doesn't block the browser. This lets physics/rendering run between iterations.
+  code = code.replace(
+    /(while\s*\(\s*(?:(?:this\.)?opModeIsActive\s*\(\s*\)|!(?:this\.)?isStopRequested\s*\(\s*\)|true)\s*(?:&&[^)]+)?\s*\)\s*\{)/g,
+    '$1\nawait this.idle();\n'
+  );
+
+  return code;
 }
 
 /**

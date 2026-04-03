@@ -641,37 +641,64 @@ export class Robot {
   // ─────────────────────────────────────────────────────
   // UPDATE
   // ─────────────────────────────────────────────────────
-  update(dt: number, input: InputManager) {
+  update(dt: number, input: InputManager, codeControlled = false) {
     // Shooting cooldown
     if (this.shootCooldown > 0) {
       this.shootCooldown -= dt;
       if (this.shootCooldown <= 0) this.canShoot = true;
     }
 
-    // Drive
-    const forward = input.getAxis('forward');
-    const strafe = input.getAxis('strafe');
-    const turn = input.getAxis('turn');
-    this.boosting = input.isPressed('boost');
+    if (!codeControlled) {
+      // ── Manual drive (only when no OpMode is running) ──
+      const forward = input.getAxis('forward');
+      const strafe = input.getAxis('strafe');
+      const turn = input.getAxis('turn');
+      this.boosting = input.isPressed('boost');
 
-    const speedMult = this.boosting ? MAX_SPEED * BOOST_MULTIPLIER : MAX_SPEED;
+      const speedMult = this.boosting ? MAX_SPEED * BOOST_MULTIPLIER : MAX_SPEED;
 
-    const quat = this.chassisBody.quaternion;
-    const fwd = new CANNON.Vec3(0, 0, -1);
-    const right = new CANNON.Vec3(1, 0, 0);
-    quat.vmult(fwd, fwd);
-    quat.vmult(right, right);
+      const quat = this.chassisBody.quaternion;
+      const fwd = new CANNON.Vec3(0, 0, -1);
+      const right = new CANNON.Vec3(1, 0, 0);
+      quat.vmult(fwd, fwd);
+      quat.vmult(right, right);
 
-    const vx = fwd.x * forward * speedMult + right.x * strafe * speedMult;
-    const vz = fwd.z * forward * speedMult + right.z * strafe * speedMult;
-    this.chassisBody.velocity.x = vx;
-    this.chassisBody.velocity.z = vz;
+      const vx = fwd.x * forward * speedMult + right.x * strafe * speedMult;
+      const vz = fwd.z * forward * speedMult + right.z * strafe * speedMult;
+      this.chassisBody.velocity.x = vx;
+      this.chassisBody.velocity.z = vz;
 
-    // Keep upright + apply turn
-    this.chassisBody.quaternion.setFromAxisAngle(
-      new CANNON.Vec3(0, 1, 0),
-      this.getYaw() + turn * TURN_SPEED * dt
-    );
+      // Keep upright + apply turn
+      this.chassisBody.quaternion.setFromAxisAngle(
+        new CANNON.Vec3(0, 1, 0),
+        this.getYaw() + turn * TURN_SPEED * dt
+      );
+
+      // Shooter control
+      const shooterPitch = input.getAxis('shooterPitch');
+      const shooterYaw = input.getAxis('shooterYaw');
+      this.shooterAngle = THREE.MathUtils.clamp(
+        this.shooterAngle + shooterPitch * 2 * dt,
+        -0.3, 1.2
+      );
+      this.shooterYaw += shooterYaw * 2 * dt;
+
+      // Shoot
+      if (input.isPressed('shoot') && this.canShoot) {
+        this.shoot();
+      }
+
+      // Intake
+      if (input.isPressed('intakeIn')) {
+        this.intakeIn();
+      } else if (input.isPressed('intakeOut')) {
+        this.intakeOut();
+      } else {
+        this.intakeDirection = 'off';
+      }
+    }
+
+    // ── Always runs (both manual and code-controlled) ──
 
     // Sync mesh ← physics
     this.chassisMesh.position.copy(this.chassisBody.position as unknown as THREE.Vector3);
@@ -679,11 +706,14 @@ export class Robot {
 
     // Animate wheels (basic mode only)
     if (!this.useCustomModel) {
-      this.wheelSpeed = Math.sqrt(vx * vx + vz * vz) / WHEEL_R;
+      const vel = this.chassisBody.velocity;
+      const speed = Math.sqrt(vel.x ** 2 + vel.z ** 2);
+      this.wheelSpeed = speed / WHEEL_R;
+      const movingForward = vel.z <= 0; // -Z is forward
       for (const wheel of this.wheels) {
         const hub = wheel.children[0];
         if (hub) {
-          hub.rotation.x += this.wheelSpeed * dt * (forward >= 0 ? 1 : -1);
+          hub.rotation.x += this.wheelSpeed * dt * (movingForward ? 1 : -1);
         }
       }
 
@@ -696,31 +726,8 @@ export class Robot {
       }
     }
 
-    // Shooter control
-    const shooterPitch = input.getAxis('shooterPitch');
-    const shooterYaw = input.getAxis('shooterYaw');
-    this.shooterAngle = THREE.MathUtils.clamp(
-      this.shooterAngle + shooterPitch * 2 * dt,
-      -0.3, 1.2
-    );
-    this.shooterYaw += shooterYaw * 2 * dt;
-
     this.shooterMesh.rotation.y = this.shooterYaw;
     this.shooterMesh.rotation.x = -this.shooterAngle * 0.5;
-
-    // Shoot
-    if (input.isPressed('shoot') && this.canShoot) {
-      this.shoot();
-    }
-
-    // Intake
-    if (input.isPressed('intakeIn')) {
-      this.intakeIn();
-    } else if (input.isPressed('intakeOut')) {
-      this.intakeOut();
-    } else {
-      this.intakeDirection = 'off';
-    }
 
     // Projectiles
     this.updateProjectiles(dt);
@@ -815,13 +822,15 @@ export class Robot {
     this.chassisBody.angularVelocity.setZero();
   }
 
-  setDrivePower(forward: number, turn: number) {
+  setDrivePower(forward: number, strafe: number, turn: number) {
     const quat = this.chassisBody.quaternion;
     const fwd = new CANNON.Vec3(0, 0, -1);
+    const right = new CANNON.Vec3(1, 0, 0);
     quat.vmult(fwd, fwd);
+    quat.vmult(right, right);
 
-    this.chassisBody.velocity.x = fwd.x * forward * MAX_SPEED;
-    this.chassisBody.velocity.z = fwd.z * forward * MAX_SPEED;
+    this.chassisBody.velocity.x = fwd.x * forward * MAX_SPEED + right.x * strafe * MAX_SPEED;
+    this.chassisBody.velocity.z = fwd.z * forward * MAX_SPEED + right.z * strafe * MAX_SPEED;
     this.chassisBody.quaternion.setFromAxisAngle(
       new CANNON.Vec3(0, 1, 0),
       this.getYaw() + turn * TURN_SPEED * 0.016

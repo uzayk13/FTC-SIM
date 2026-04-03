@@ -310,8 +310,8 @@ export class Engine {
       // Input
       this.input.update();
 
-      // Robot
-      this.robot.update(dt, this.input);
+      // Robot — skip manual drive when user code is controlling
+      this.robot.update(dt, this.input, this.codeRunner.running);
 
       // Code runner
       this.codeRunner.update(dt);
