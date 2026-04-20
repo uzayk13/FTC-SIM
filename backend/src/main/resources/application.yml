@@ -1,0 +1,15 @@
+server:
+  port: 8080
+  tomcat:
+    max-http-form-post-size: 512KB
+
+spring:
+  servlet:
+    multipart:
+      max-request-size: 512KB
+      max-file-size: 128KB
+
+compile:
+  timeout-seconds: 10
+  max-files: 50
+  java-release: 17

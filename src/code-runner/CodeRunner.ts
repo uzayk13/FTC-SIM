@@ -2,6 +2,7 @@ import type { Engine } from '../core/Engine';
 import { createFtcRuntime, type FtcRuntimeContext } from './FtcRuntime';
 import { transpileJava, stripTypeScript, detectLanguage } from './JavaTranspiler';
 import { analyzeProjectFiles } from './GradleParser';
+import { compileJava } from '../api/ApiClient';
 
 interface OpMode {
   init?(robot: any): void;
@@ -98,12 +99,43 @@ export class CodeRunner {
 
   /**
    * Compile and run multiple Java files (FTC SDK / FTCLib).
+   * Tries the backend compiler first; falls back to local regex transpiler.
    */
   private compileJavaProject(files: ProjectFile[]) {
     // Initialize FTC runtime
     this.ftcRuntime = createFtcRuntime(this.engine);
 
-    // Transpile each file
+    // Try backend compilation first
+    this.log('Attempting server-side compilation...');
+    compileJava(files).then((response) => {
+      if (response && response.success && response.transpiledCode) {
+        this.log('Server compilation successful.');
+        if (response.warnings.length > 0) {
+          for (const w of response.warnings) {
+            this.log(`  Warning: ${w.file ?? ''}:${w.line} - ${w.message}`);
+          }
+        }
+        this.log(`Main OpMode: ${response.className} (${response.opModeType})`);
+        this.executeWithRuntime(response.transpiledCode, response.className!);
+      } else if (response && !response.success) {
+        // Backend returned compilation errors
+        this.log('Compilation errors:');
+        for (const err of response.errors) {
+          const loc = err.file ? `${err.file}:${err.line}:${err.column}` : `line ${err.line}`;
+          this.log(`  ${loc} - ${err.message}`);
+        }
+      } else {
+        // Backend unreachable — fall back to local transpiler
+        this.log('Backend unavailable, using local transpiler...');
+        this.compileJavaLocal(files);
+      }
+    });
+  }
+
+  /**
+   * Local (regex-based) Java transpilation fallback.
+   */
+  private compileJavaLocal(files: ProjectFile[]) {
     const transpiled: Array<{ path: string; code: string; className: string | null; isOpMode: boolean }> = [];
     let mainOpModeClass: string | null = null;
     let mainOpModeType: string = 'unknown';
@@ -135,7 +167,6 @@ export class CodeRunner {
     }
 
     if (!mainOpModeClass) {
-      // Fallback: use last file's class
       for (let i = transpiled.length - 1; i >= 0; i--) {
         if (transpiled[i].className) {
           mainOpModeClass = transpiled[i].className;
@@ -153,7 +184,6 @@ export class CodeRunner {
 
     this.log(`Main OpMode: ${mainOpModeClass} (${mainOpModeType})`);
 
-    // Concatenate all transpiled code (subsystems first, then OpMode)
     const allCode = transpiled
       .sort((a, b) => (a.isOpMode ? 1 : 0) - (b.isOpMode ? 1 : 0))
       .map(t => t.code)
