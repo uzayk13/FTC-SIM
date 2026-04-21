@@ -7,6 +7,7 @@ interface Props {
   useCustomModel: boolean;
   setUseCustomModel: (v: boolean) => void;
   onLaunch: () => void;
+  onViewCode: () => void;
 }
 
 function readFileAsText(file: File): Promise<string> {
@@ -88,7 +89,7 @@ async function fetchGitHubDirectory(owner: string, repo: string, branch: string,
   return files;
 }
 
-export function LandingPage({ loadedFiles, setLoadedFiles, useCustomModel, setUseCustomModel, onLaunch }: Props) {
+export function LandingPage({ loadedFiles, setLoadedFiles, useCustomModel, setUseCustomModel, onLaunch, onViewCode }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
 
@@ -302,6 +303,9 @@ export function LandingPage({ loadedFiles, setLoadedFiles, useCustomModel, setUs
           <div className="landing-actions">
             <button className="launch-btn" disabled={!canLaunch} onClick={onLaunch}>
               Launch Simulator
+            </button>
+            <button className="view-code-btn" disabled={!canLaunch} onClick={onViewCode}>
+              View Code
             </button>
           </div>
         </div>

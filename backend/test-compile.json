@@ -1,0 +1,9 @@
+{
+  "mode": "transpile",
+  "files": [
+    {
+      "path": "TestOpMode.java",
+      "content": "import com.qualcomm.robotcore.eventloop.opmode.OpMode;\nimport com.qualcomm.robotcore.eventloop.opmode.TeleOp;\n\n@TeleOp(name=\"Test\")\npublic class TestOpMode extends OpMode {\n    private int counter = 0;\n    public void init() { telemetry.addData(\"status\", \"initialized\"); }\n    public void loop() { counter++; telemetry.addData(\"count\", counter); }\n}\n"
+    }
+  ]
+}

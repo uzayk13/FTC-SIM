@@ -1,9 +1,17 @@
+import { useMemo } from 'react';
+import type { ProjectFile } from '../code-runner/CodeRunner';
+import { scanGamepadUsage } from '../code-runner/GamepadUsageScanner';
+import { displayKey, type Keymap, type AxisField, type ButtonField } from '../input/Keymap';
+
 interface Props {
   visible: boolean;
   onClose: () => void;
+  files: ProjectFile[];
+  keymap: Keymap;
 }
 
-export function ControlsPanel({ visible, onClose }: Props) {
+export function ControlsPanel({ visible, onClose, files, keymap }: Props) {
+  const usage = useMemo(() => scanGamepadUsage(files), [files]);
   if (!visible) return null;
 
   return (
@@ -12,19 +20,40 @@ export function ControlsPanel({ visible, onClose }: Props) {
         <h3>Controls</h3>
         <button className="controls-close" onClick={onClose}>&times;</button>
       </div>
+
       <div className="control-group">
-        <h4>Movement</h4>
-        <p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> — Drive / Strafe</p>
-        <p><kbd>Q</kbd><kbd>E</kbd> — Turn Left / Right</p>
-        <p><kbd>Shift</kbd> — Boost</p>
+        <h4>From your code</h4>
+        {usage.length === 0 ? (
+          <p style={{ color: '#94a3b8', fontSize: 12 }}>
+            No gamepad inputs detected in the uploaded code.
+          </p>
+        ) : (
+          usage.map((u) => {
+            const bindings = u.gamepad === 1 ? keymap.gamepad1 : keymap.gamepad2;
+            const label = `gamepad${u.gamepad}.${u.field}`;
+            if (u.isAxis) {
+              const b = bindings.axes[u.field as AxisField];
+              const isTrigger = u.field === 'left_trigger' || u.field === 'right_trigger';
+              return (
+                <p key={label}>
+                  {isTrigger
+                    ? <><kbd>{displayKey(b?.positive)}</kbd></>
+                    : <><kbd>{displayKey(b?.positive)}</kbd>/<kbd>{displayKey(b?.negative)}</kbd></>
+                  }
+                  {' '}— {label}
+                </p>
+              );
+            }
+            const b = bindings.buttons[u.field as ButtonField];
+            return (
+              <p key={label}>
+                <kbd>{displayKey(b?.key)}</kbd> — {label}
+              </p>
+            );
+          })
+        )}
       </div>
-      <div className="control-group">
-        <h4>Actions</h4>
-        <p><kbd>Space</kbd> — Shoot</p>
-        <p><kbd>Z</kbd><kbd>X</kbd> — Intake In / Out</p>
-        <p><kbd>&uarr;</kbd><kbd>&darr;</kbd> — Shooter Pitch</p>
-        <p><kbd>&larr;</kbd><kbd>&rarr;</kbd> — Shooter Yaw</p>
-      </div>
+
       <div className="control-group">
         <h4>Camera</h4>
         <p><kbd>F</kbd> — Toggle Freecam</p>
@@ -32,18 +61,10 @@ export function ControlsPanel({ visible, onClose }: Props) {
         <p>Mouse Drag — Orbit Camera</p>
         <p>Scroll — Zoom In / Out</p>
       </div>
+
       <div className="control-group">
         <h4>Other</h4>
-        <p><kbd>R</kbd> — Reset Robot</p>
         <p><kbd>H</kbd> — Toggle This Panel</p>
-      </div>
-      <div className="control-group">
-        <h4>Gamepad</h4>
-        <p>Left Stick — Drive / Strafe</p>
-        <p>Right Stick — Turn / Pitch</p>
-        <p>LB / RB — Intake In / Out</p>
-        <p>A — Shoot</p>
-        <p>B — Boost</p>
       </div>
     </div>
   );

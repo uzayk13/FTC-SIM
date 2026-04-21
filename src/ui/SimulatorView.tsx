@@ -7,13 +7,15 @@ import { ControlsPanel } from './ControlsPanel';
 import { CodeStatus } from './CodeStatus';
 import { Telemetry } from './Telemetry';
 import { GamepadIndicator } from './GamepadIndicator';
+import type { Keymap } from '../input/Keymap';
 
 interface Props {
   loadedFiles: ProjectFile[];
   useCustomModel: boolean;
+  keymap: Keymap;
 }
 
-export function SimulatorView({ loadedFiles, useCustomModel }: Props) {
+export function SimulatorView({ loadedFiles, useCustomModel, keymap }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<Engine | null>(null);
 
@@ -35,7 +37,7 @@ export function SimulatorView({ loadedFiles, useCustomModel }: Props) {
     const canvas = canvasRef.current;
     if (!canvas || engineRef.current) return;
 
-    const engine = new Engine(canvas, useCustomModel);
+    const engine = new Engine(canvas, useCustomModel, keymap);
     engineRef.current = engine;
     (window as any).__engine = engine;
     engine.start();
@@ -101,6 +103,8 @@ export function SimulatorView({ loadedFiles, useCustomModel }: Props) {
         <ControlsPanel
           visible={showControls}
           onClose={() => setShowControls(false)}
+          files={loadedFiles}
+          keymap={keymap}
         />
         {showCodeStatus && (
           <CodeStatus

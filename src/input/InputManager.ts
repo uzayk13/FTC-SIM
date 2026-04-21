@@ -1,3 +1,6 @@
+import type { Keymap, GamepadBindings } from './Keymap';
+import { AXIS_FIELDS, BUTTON_FIELDS, defaultKeymap } from './Keymap';
+
 export interface GamepadState {
   left_stick_x: number;
   left_stick_y: number;
@@ -27,12 +30,19 @@ export class InputManager {
   gamepad1: GamepadState = this.emptyGamepad();
   gamepad2: GamepadState = this.emptyGamepad();
 
+  // Physical gamepad readings, before keyboard composition.
+  private physical1: GamepadState = this.emptyGamepad();
+  private physical2: GamepadState = this.emptyGamepad();
+
+  private keymap: Keymap = defaultKeymap();
+
   private onKeyDown: (e: KeyboardEvent) => void;
   private onKeyUp: (e: KeyboardEvent) => void;
   private onGamepadConnected: (e: GamepadEvent) => void;
   private onGamepadDisconnected: (e: GamepadEvent) => void;
 
-  constructor() {
+  constructor(keymap?: Keymap) {
+    if (keymap) this.keymap = keymap;
     this.onKeyDown = (e: KeyboardEvent) => {
       // Don't capture input when typing in textarea
       if ((e.target as HTMLElement)?.tagName === 'TEXTAREA') return;
@@ -76,41 +86,51 @@ export class InputManager {
 
   update() {
     this.pollGamepad();
-    this.applyKeyboardToGamepad();
+    this.gamepad1 = this.compose(this.physical1, this.keymap.gamepad1);
+    this.gamepad2 = this.compose(this.physical2, this.keymap.gamepad2);
+  }
+
+  setKeymap(keymap: Keymap) {
+    this.keymap = keymap;
   }
 
   /**
-   * Map keyboard keys onto gamepad1 state so that user OpMode code
-   * reading gamepad1.left_stick_y etc. works with keyboard input.
+   * Build the final gamepad state for this frame from the physical reading
+   * (if any) plus current keyboard. Both are recomputed every frame, so
+   * releasing a key returns the field to rest immediately.
    */
-  private applyKeyboardToGamepad() {
-    // Only apply keyboard to gamepad1 if no real gamepad is providing input
-    // (real gamepad values take priority)
-    const gp = this.gamepad1;
+  private compose(physical: GamepadState, bindings: GamepadBindings): GamepadState {
+    const out: GamepadState = { ...physical };
 
-    // Sticks — keyboard overrides if real gamepad axes are zero
-    const kbForward = (this.keys.has('KeyW') ? 1 : 0) - (this.keys.has('KeyS') ? 1 : 0);
-    const kbStrafe = (this.keys.has('KeyD') ? 1 : 0) - (this.keys.has('KeyA') ? 1 : 0);
-    const kbTurn = (this.keys.has('KeyE') ? 1 : 0) - (this.keys.has('KeyQ') ? 1 : 0);
+    for (const field of AXIS_FIELDS) {
+      const b = bindings.axes[field];
+      if (!b) continue;
+      const isTrigger = field === 'left_trigger' || field === 'right_trigger';
+      const physicalActive = isTrigger ? physical[field] > 0.01 : Math.abs(physical[field]) > 0.01;
+      if (physicalActive) continue;
+      if (isTrigger) {
+        out[field] = b.positive && this.keys.has(b.positive) ? 1 : 0;
+      } else {
+        const pos = b.positive && this.keys.has(b.positive) ? 1 : 0;
+        const neg = b.negative && this.keys.has(b.negative) ? 1 : 0;
+        out[field] = pos - neg;
+      }
+    }
 
-    if (Math.abs(gp.left_stick_y) < 0.01) gp.left_stick_y = kbForward;
-    if (Math.abs(gp.left_stick_x) < 0.01) gp.left_stick_x = kbStrafe;
-    if (Math.abs(gp.right_stick_x) < 0.01) gp.right_stick_x = kbTurn;
+    for (const field of BUTTON_FIELDS) {
+      const b = bindings.buttons[field];
+      if (!b || !b.key) continue;
+      out[field] = physical[field] || this.keys.has(b.key);
+    }
 
-    // Buttons
-    if (!gp.a) gp.a = this.keys.has('Space');
-    if (!gp.b) gp.b = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
-    if (!gp.left_bumper) gp.left_bumper = this.keys.has('KeyZ');
-    if (!gp.right_bumper) gp.right_bumper = this.keys.has('KeyX');
-    if (!gp.dpad_up) gp.dpad_up = this.keys.has('ArrowUp');
-    if (!gp.dpad_down) gp.dpad_down = this.keys.has('ArrowDown');
-    if (!gp.dpad_left) gp.dpad_left = this.keys.has('ArrowLeft');
-    if (!gp.dpad_right) gp.dpad_right = this.keys.has('ArrowRight');
-    if (!gp.x) gp.x = this.keys.has('KeyR');
-    if (!gp.y) gp.y = this.keys.has('KeyF');
+    return out;
   }
 
   private pollGamepad() {
+    // Reset physical state each frame so disconnects / no-input return to rest.
+    this.physical1 = this.emptyGamepad();
+    this.physical2 = this.emptyGamepad();
+
     if (!this.gamepadConnected) return;
 
     const gamepads = navigator.getGamepads();
@@ -120,7 +140,7 @@ export class InputManager {
     const deadzone = 0.1;
     const applyDeadzone = (v: number) => Math.abs(v) < deadzone ? 0 : v;
 
-    this.gamepad1 = {
+    this.physical1 = {
       left_stick_x: applyDeadzone(gp.axes[0] ?? 0),
       left_stick_y: applyDeadzone(-(gp.axes[1] ?? 0)), // invert Y
       right_stick_x: applyDeadzone(gp.axes[2] ?? 0),
@@ -144,7 +164,7 @@ export class InputManager {
     // Second gamepad
     const gp2 = gamepads[this.gamepadIndex + 1];
     if (gp2) {
-      this.gamepad2 = {
+      this.physical2 = {
         left_stick_x: applyDeadzone(gp2.axes[0] ?? 0),
         left_stick_y: applyDeadzone(-(gp2.axes[1] ?? 0)),
         right_stick_x: applyDeadzone(gp2.axes[2] ?? 0),
@@ -167,42 +187,22 @@ export class InputManager {
     }
   }
 
-  // Unified axis getters combining keyboard + gamepad
+  /**
+   * Unified axis getters. Movement axes read from the keymap-driven
+   * gamepad1 state so remaps apply here too; camera/sim keys stay raw.
+   */
   getAxis(name: string): number {
+    const clamp = (v: number) => Math.max(-1, Math.min(1, v));
     switch (name) {
-      case 'forward': {
-        let v = 0;
-        if (this.keys.has('KeyW')) v += 1;
-        if (this.keys.has('KeyS')) v -= 1;
-        if (this.gamepadConnected) v += this.gamepad1.left_stick_y;
-        return Math.max(-1, Math.min(1, v));
-      }
-      case 'strafe': {
-        let v = 0;
-        if (this.keys.has('KeyA')) v -= 1;
-        if (this.keys.has('KeyD')) v += 1;
-        if (this.gamepadConnected) v += this.gamepad1.left_stick_x;
-        return Math.max(-1, Math.min(1, v));
-      }
-      case 'turn': {
-        let v = 0;
-        if (this.keys.has('KeyQ')) v -= 1;
-        if (this.keys.has('KeyE')) v += 1;
-        if (this.gamepadConnected) v += this.gamepad1.right_stick_x;
-        return Math.max(-1, Math.min(1, v));
-      }
-      case 'shooterPitch': {
-        let v = 0;
-        if (this.keys.has('ArrowUp')) v += 1;
-        if (this.keys.has('ArrowDown')) v -= 1;
-        if (this.gamepadConnected) v += this.gamepad1.right_stick_y;
-        return Math.max(-1, Math.min(1, v));
-      }
+      case 'forward': return clamp(this.gamepad1.left_stick_y);
+      case 'strafe': return clamp(this.gamepad1.left_stick_x);
+      case 'turn': return clamp(this.gamepad1.right_stick_x);
+      case 'shooterPitch': return clamp(this.gamepad1.right_stick_y);
       case 'shooterYaw': {
-        let v = 0;
-        if (this.keys.has('ArrowLeft')) v -= 1;
-        if (this.keys.has('ArrowRight')) v += 1;
-        return Math.max(-1, Math.min(1, v));
+        // Historically dpad_left/right; follow whatever is bound to them now.
+        const l = this.gamepad1.dpad_left ? 1 : 0;
+        const r = this.gamepad1.dpad_right ? 1 : 0;
+        return clamp(r - l);
       }
       default:
         return 0;
@@ -211,27 +211,18 @@ export class InputManager {
 
   isPressed(name: string): boolean {
     switch (name) {
-      case 'shoot':
-        return this.keys.has('Space') || (this.gamepadConnected && this.gamepad1.a);
-      case 'intakeIn':
-        return this.keys.has('KeyZ') || (this.gamepadConnected && this.gamepad1.left_bumper);
-      case 'intakeOut':
-        return this.keys.has('KeyX') || (this.gamepadConnected && this.gamepad1.right_bumper);
-      case 'boost':
-        return this.keys.has('ShiftLeft') || this.keys.has('ShiftRight') ||
-               (this.gamepadConnected && this.gamepad1.b);
-      case 'reset':
-        return this.keys.has('KeyR');
-      case 'freecam':
-        return this.keys.has('KeyF');
-      case 'cam1':
-        return this.keys.has('Digit1');
-      case 'cam2':
-        return this.keys.has('Digit2');
-      case 'cam3':
-        return this.keys.has('Digit3');
-      default:
-        return false;
+      // Gamepad-driven (follow keymap)
+      case 'shoot': return this.gamepad1.a;
+      case 'intakeIn': return this.gamepad1.left_bumper;
+      case 'intakeOut': return this.gamepad1.right_bumper;
+      case 'boost': return this.gamepad1.b;
+      // Sim-only, hardcoded
+      case 'reset': return this.keys.has('KeyR');
+      case 'freecam': return this.keys.has('KeyF');
+      case 'cam1': return this.keys.has('Digit1');
+      case 'cam2': return this.keys.has('Digit2');
+      case 'cam3': return this.keys.has('Digit3');
+      default: return false;
     }
   }
 
