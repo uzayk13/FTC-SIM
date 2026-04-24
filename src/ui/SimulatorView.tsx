@@ -8,14 +8,15 @@ import { CodeStatus } from './CodeStatus';
 import { Telemetry } from './Telemetry';
 import { GamepadIndicator } from './GamepadIndicator';
 import type { Keymap } from '../input/Keymap';
+import type { UploadedRobotModel } from '../robot/RobotModel';
 
 interface Props {
   loadedFiles: ProjectFile[];
-  useCustomModel: boolean;
+  robotModel: UploadedRobotModel | null;
   keymap: Keymap;
 }
 
-export function SimulatorView({ loadedFiles, useCustomModel, keymap }: Props) {
+export function SimulatorView({ loadedFiles, robotModel, keymap }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<Engine | null>(null);
 
@@ -37,7 +38,7 @@ export function SimulatorView({ loadedFiles, useCustomModel, keymap }: Props) {
     const canvas = canvasRef.current;
     if (!canvas || engineRef.current) return;
 
-    const engine = new Engine(canvas, useCustomModel, keymap);
+    const engine = new Engine(canvas, robotModel, keymap);
     engineRef.current = engine;
     (window as any).__engine = engine;
     engine.start();

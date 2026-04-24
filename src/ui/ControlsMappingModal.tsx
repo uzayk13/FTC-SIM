@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { ProjectFile } from '../code-runner/CodeRunner';
 import { scanGamepadUsage, type GamepadUsage } from '../code-runner/GamepadUsageScanner';
 import {
-  defaultKeymap, loadSavedKeymap, saveKeymap,
+  defaultKeymap, emptyKeymap, loadSavedKeymap, saveKeymap,
   displayKey, RESERVED_KEYS,
   type Keymap, type GamepadBindings,
   type AxisField, type ButtonField,
@@ -89,7 +89,7 @@ export function ControlsMappingModal({ files, onStart, onCancel }: Props) {
 
   const handleStart = () => {
     saveKeymap(keymap);
-    onStart(keymap);
+    onStart(filterKeymapToUsage(keymap, usage));
   };
 
   const bindingFor = (slot: Slot): string | undefined => {
@@ -231,6 +231,22 @@ function slotLabel(s: Slot): string {
 
 function truncate(s: string, n: number): string {
   return s.length <= n ? s : s.slice(0, n - 1) + '…';
+}
+
+function filterKeymapToUsage(km: Keymap, usage: GamepadUsage[]): Keymap {
+  const next = emptyKeymap();
+  for (const u of usage) {
+    const src = u.gamepad === 1 ? km.gamepad1 : km.gamepad2;
+    const dst = u.gamepad === 1 ? next.gamepad1 : next.gamepad2;
+    if (u.isAxis) {
+      const b = src.axes[u.field as AxisField];
+      if (b) dst.axes[u.field as AxisField] = { ...b };
+    } else {
+      const b = src.buttons[u.field as ButtonField];
+      if (b) dst.buttons[u.field as ButtonField] = { ...b };
+    }
+  }
+  return next;
 }
 
 function findCollisions(km: Keymap): Set<string> {

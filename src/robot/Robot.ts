@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { InputManager } from '../input/InputManager';
+import type { UploadedRobotModel } from './RobotModel';
+import { buildTransformedGroup, buildHulls } from './RobotModel';
 
 // Chassis dimensions (meters)
 const FRAME_W = 0.440;
@@ -77,16 +77,16 @@ export class Robot {
   speed = 0;
   turnRate = 0;
   boosting = false;
-  useCustomModel: boolean;
+  uploadedModel: UploadedRobotModel | null;
 
   telemetry: Record<string, string | number> = {};
 
   envMap: THREE.Texture | null;
 
-  constructor(scene: THREE.Scene, world: CANNON.World, useCustomModel = false, envMap: THREE.Texture | null = null) {
+  constructor(scene: THREE.Scene, world: CANNON.World, uploadedModel: UploadedRobotModel | null = null, envMap: THREE.Texture | null = null) {
     this.scene = scene;
     this.world = world;
-    this.useCustomModel = useCustomModel;
+    this.uploadedModel = uploadedModel;
     this.envMap = envMap;
     this.build();
   }
@@ -97,11 +97,17 @@ export class Robot {
     this.shooterMesh = new THREE.Group();
     this.slideMesh = new THREE.Group();
 
-    if (this.useCustomModel) {
+    let useUploadedHulls = false;
+
+    if (this.uploadedModel) {
       this.chassisMesh.add(this.intakeMesh);
       this.chassisMesh.add(this.shooterMesh);
       this.chassisMesh.add(this.slideMesh);
-      this.loadCustomModel();
+      const group = buildTransformedGroup(this.uploadedModel);
+      this.chassisMesh.add(group);
+      useUploadedHulls = true;
+      // Stash for physics body construction below.
+      (this as any)._uploadedGroup = group;
     } else {
       this.buildFrame();
       this.buildWheels();
@@ -119,94 +125,43 @@ export class Robot {
     this.chassisMesh.position.copy(this.initialPos);
     this.scene.add(this.chassisMesh);
 
-    // Physics body — compound of spheres for sphere-trimesh collision.
-    const halfW = FRAME_W / 2;
-    const halfH = (CHAN_SIZE + 0.01) / 2;
-    const halfD = FRAME_D / 2;
-    const SR = 0.04;
     this.chassisBody = new CANNON.Body({
       mass: 14,
       linearDamping: 0.9,
       angularDamping: 0.95,
     });
-    // 4 bottom corners + 1 center = 5 spheres (sufficient for floor + wall contact)
-    for (const [sx, sz] of [[-halfW+SR, -halfD+SR], [halfW-SR, -halfD+SR], [-halfW+SR, halfD-SR], [halfW-SR, halfD-SR], [0, 0]]) {
-      this.chassisBody.addShape(new CANNON.Sphere(SR), new CANNON.Vec3(sx, 0, sz));
+
+    if (useUploadedHulls) {
+      const group: THREE.Group = (this as any)._uploadedGroup;
+      const hulls = buildHulls(group);
+      if (hulls.length > 0) {
+        for (const h of hulls) {
+          this.chassisBody.addShape(h.shape, h.offset);
+        }
+      } else {
+        // Fallback: use a bbox-sized box if hull build failed.
+        const bbox = new THREE.Box3().setFromObject(group);
+        const size = new THREE.Vector3();
+        bbox.getSize(size);
+        const hx = Math.max(0.05, size.x / 2);
+        const hy = Math.max(0.05, size.y / 2);
+        const hz = Math.max(0.05, size.z / 2);
+        this.chassisBody.addShape(new CANNON.Box(new CANNON.Vec3(hx, hy, hz)));
+      }
+    } else {
+      // Default chassis: compound of spheres (legacy collider).
+      const halfW = FRAME_W / 2;
+      const halfD = FRAME_D / 2;
+      const SR = 0.04;
+      for (const [sx, sz] of [[-halfW+SR, -halfD+SR], [halfW-SR, -halfD+SR], [-halfW+SR, halfD-SR], [halfW-SR, halfD-SR], [0, 0]]) {
+        this.chassisBody.addShape(new CANNON.Sphere(SR), new CANNON.Vec3(sx, 0, sz));
+      }
     }
+
     this.chassisBody.position.set(this.initialPos.x, this.initialPos.y, this.initialPos.z);
     this.chassisBody.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), Math.PI);
     this.chassisMesh.rotation.y = Math.PI;
     this.world.addBody(this.chassisBody);
-  }
-
-  // ─── CUSTOM MODEL LOADING ───
-  private loadCustomModel() {
-    const overlay = document.createElement('div');
-    overlay.id = 'model-loading-overlay';
-    overlay.innerHTML = `
-      <div style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.75);
-        display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:9999;
-        font-family:monospace;color:#fff;">
-        <div style="font-size:18px;margin-bottom:16px;">Loading Robot Model...</div>
-        <div style="width:300px;height:20px;background:#333;border-radius:10px;overflow:hidden;">
-          <div id="model-load-bar" style="width:0%;height:100%;background:#00cc44;transition:width 0.2s;"></div>
-        </div>
-        <div id="model-load-text" style="margin-top:10px;font-size:14px;color:#aaa;">0%</div>
-      </div>
-    `;
-    document.body.appendChild(overlay);
-
-    const loader = new GLTFLoader();
-    const dracoLoader = new DRACOLoader();
-    dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
-    loader.setDRACOLoader(dracoLoader);
-
-    loader.load('/Robot.gltf', (gltf) => {
-      overlay.remove();
-      const model = gltf.scene;
-
-      const bbox = new THREE.Box3().setFromObject(model);
-      const size = new THREE.Vector3();
-      bbox.getSize(size);
-
-      const maxHorizontal = Math.max(size.x, size.z);
-      const scale = FRAME_W / maxHorizontal;
-      model.scale.setScalar(scale);
-
-      const scaledBox = new THREE.Box3().setFromObject(model);
-      const scaledCenter = new THREE.Vector3();
-      scaledBox.getCenter(scaledCenter);
-
-      model.position.set(
-        -scaledCenter.x,
-        -scaledBox.min.y - CHAN_SIZE / 2,
-        -scaledCenter.z,
-      );
-
-      model.traverse((child) => {
-        if ((child as THREE.Mesh).isMesh) {
-          child.castShadow = true;
-          child.receiveShadow = true;
-        }
-      });
-
-      this.chassisMesh.add(model);
-    },
-    (progress) => {
-      const bar = document.getElementById('model-load-bar');
-      const text = document.getElementById('model-load-text');
-      if (progress.total > 0) {
-        const pct = ((progress.loaded / progress.total) * 100).toFixed(0);
-        if (bar) bar.style.width = pct + '%';
-        if (text) text.textContent = `${pct}% (${(progress.loaded / 1e6).toFixed(1)} / ${(progress.total / 1e6).toFixed(1)} MB)`;
-      } else {
-        if (text) text.textContent = `${(progress.loaded / 1e6).toFixed(1)} MB loaded...`;
-      }
-    },
-    (error) => {
-      overlay.remove();
-      console.error('Failed to load Robot model:', error);
-    });
   }
 
   // ─── FRAME: goBILDA U-Channel rails ───
@@ -705,7 +660,7 @@ export class Robot {
     this.chassisMesh.quaternion.copy(this.chassisBody.quaternion as unknown as THREE.Quaternion);
 
     // Animate wheels (basic mode only)
-    if (!this.useCustomModel) {
+    if (!this.uploadedModel) {
       const vel = this.chassisBody.velocity;
       const speed = Math.sqrt(vel.x ** 2 + vel.z ** 2);
       this.wheelSpeed = speed / WHEEL_R;

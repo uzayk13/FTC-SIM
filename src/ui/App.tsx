@@ -4,14 +4,16 @@ import { LandingPage } from './LandingPage';
 import { SimulatorView } from './SimulatorView';
 import { CodeViewer } from './CodeViewer';
 import { ControlsMappingModal } from './ControlsMappingModal';
+import { ModelViewer } from './ModelViewer';
 import { defaultKeymap, type Keymap } from '../input/Keymap';
+import type { UploadedRobotModel } from '../robot/RobotModel';
 
-type View = 'landing' | 'mapping' | 'simulator' | 'code';
+type View = 'landing' | 'mapping' | 'simulator' | 'code' | 'modelviewer';
 
 export function App() {
   const [view, setView] = useState<View>('landing');
   const [loadedFiles, setLoadedFiles] = useState<ProjectFile[]>([]);
-  const [useCustomModel, setUseCustomModel] = useState(false);
+  const [robotModel, setRobotModel] = useState<UploadedRobotModel | null>(null);
   const [keymap, setKeymap] = useState<Keymap>(defaultKeymap());
 
   if (view === 'landing') {
@@ -19,16 +21,27 @@ export function App() {
       <LandingPage
         loadedFiles={loadedFiles}
         setLoadedFiles={setLoadedFiles}
-        useCustomModel={useCustomModel}
-        setUseCustomModel={setUseCustomModel}
+        robotModel={robotModel}
+        setRobotModel={setRobotModel}
         onLaunch={() => setView('mapping')}
         onViewCode={() => setView('code')}
+        onViewModel={() => setView('modelviewer')}
       />
     );
   }
 
   if (view === 'code') {
     return <CodeViewer files={loadedFiles} onBack={() => setView('landing')} />;
+  }
+
+  if (view === 'modelviewer' && robotModel) {
+    return (
+      <ModelViewer
+        model={robotModel}
+        onUpdate={setRobotModel}
+        onBack={() => setView('landing')}
+      />
+    );
   }
 
   if (view === 'mapping') {
@@ -44,7 +57,7 @@ export function App() {
   return (
     <SimulatorView
       loadedFiles={loadedFiles}
-      useCustomModel={useCustomModel}
+      robotModel={robotModel}
       keymap={keymap}
     />
   );
