@@ -1,16 +1,11 @@
 import { useRef, useState } from 'react';
 import type { ProjectFile } from '../code-runner/CodeRunner';
-import type { UploadedRobotModel } from '../robot/RobotModel';
-import { parseGLBFile } from '../robot/RobotModel';
 
 interface Props {
   loadedFiles: ProjectFile[];
   setLoadedFiles: (files: ProjectFile[]) => void;
-  robotModel: UploadedRobotModel | null;
-  setRobotModel: (m: UploadedRobotModel | null) => void;
   onLaunch: () => void;
   onViewCode: () => void;
-  onViewModel: () => void;
 }
 
 function readFileAsText(file: File): Promise<string> {
@@ -92,10 +87,9 @@ async function fetchGitHubDirectory(owner: string, repo: string, branch: string,
   return files;
 }
 
-export function LandingPage({ loadedFiles, setLoadedFiles, robotModel, setRobotModel, onLaunch, onViewCode, onViewModel }: Props) {
+export function LandingPage({ loadedFiles, setLoadedFiles, onLaunch, onViewCode }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
-  const modelInputRef = useRef<HTMLInputElement>(null);
 
   const [fileStatus, setFileStatus] = useState('');
   const [fileError, setFileError] = useState(false);
@@ -103,28 +97,6 @@ export function LandingPage({ loadedFiles, setLoadedFiles, robotModel, setRobotM
   const [githubStatus, setGithubStatus] = useState('');
   const [githubError, setGithubError] = useState(false);
   const [activeCard, setActiveCard] = useState<'file' | 'github' | null>(null);
-  const [modelStatus, setModelStatus] = useState(robotModel ? `Loaded: ${robotModel.name}` : '');
-  const [modelError, setModelError] = useState(false);
-
-  const handleModelUpload = async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    const file = files[0];
-    if (!/\.(glb|gltf)$/i.test(file.name)) {
-      setModelStatus('Expected a .glb or .gltf file.');
-      setModelError(true);
-      return;
-    }
-    try {
-      setModelStatus(`Parsing ${file.name}…`);
-      setModelError(false);
-      const model = await parseGLBFile(file);
-      setRobotModel(model);
-      setModelStatus(`Loaded: ${file.name}`);
-    } catch (err: any) {
-      setModelStatus(`Error: ${err.message ?? String(err)}`);
-      setModelError(true);
-    }
-  };
 
   const handleFileUpload = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -310,45 +282,6 @@ export function LandingPage({ loadedFiles, setLoadedFiles, robotModel, setRobotM
               <button className="upload-btn" onClick={handleGithubFetch}>Fetch Code</button>
               {githubStatus && (
                 <div className={`file-selected${githubError ? ' error' : ''}`}>{githubStatus}</div>
-              )}
-            </div>
-          </div>
-
-          <div className="upload-options" style={{ marginTop: 20 }}>
-            <div className={`upload-card${robotModel ? ' active' : ''}`}>
-              <div className="upload-icon">&#129302;</div>
-              <h3>Robot CAD Model (optional)</h3>
-              <p>Upload a .glb / .gltf file of your robot. Auto-fit to chassis, multi-hull physics.</p>
-              <button className="upload-btn" onClick={() => modelInputRef.current?.click()}>
-                {robotModel ? 'Replace Model' : 'Choose .glb / .gltf'}
-              </button>
-              <input
-                ref={modelInputRef}
-                type="file"
-                accept=".glb,.gltf"
-                style={{ display: 'none' }}
-                onChange={(e) => handleModelUpload(e.target.files)}
-              />
-              {robotModel && (
-                <button
-                  className="upload-btn upload-btn-secondary"
-                  style={{ marginTop: 8 }}
-                  onClick={onViewModel}
-                >
-                  View / Adjust Model
-                </button>
-              )}
-              {robotModel && (
-                <button
-                  className="upload-btn upload-btn-secondary"
-                  style={{ marginTop: 8, background: '#3a1a1a' }}
-                  onClick={() => { setRobotModel(null); setModelStatus(''); }}
-                >
-                  Remove
-                </button>
-              )}
-              {modelStatus && (
-                <div className={`file-selected${modelError ? ' error' : ''}`}>{modelStatus}</div>
               )}
             </div>
           </div>

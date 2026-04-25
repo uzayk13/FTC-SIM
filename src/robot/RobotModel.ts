@@ -3,6 +3,7 @@ import * as CANNON from 'cannon-es';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { ConvexHull } from 'three/examples/jsm/math/ConvexHull.js';
+import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 export interface UploadedRobotModel {
   name: string;
@@ -20,8 +21,7 @@ export interface UploadedRobotModel {
 const FRAME_W = 0.440;
 const MAX_HULL_VERTS = 28;
 
-const MAX_TEXT_GLTF_BYTES = 200 * 1024 * 1024;  // 200 MB; V8 string cap is ~512 MB
-const MAX_GLB_BYTES = 500 * 1024 * 1024;        // 500 MB; practical upper bound
+const MAX_GLB_BYTES = 600 * 1024 * 1024;        // 600 MB; practical upper bound
 
 export async function parseGLBFile(file: File): Promise<UploadedRobotModel> {
   const loader = new GLTFLoader();
@@ -36,52 +36,43 @@ export async function parseGLBFile(file: File): Promise<UploadedRobotModel> {
     head[0] === 0x67 && head[1] === 0x6c && head[2] === 0x54 && head[3] === 0x46;
 
   const sizeMB = (buf.byteLength / (1024 * 1024)).toFixed(1);
-  if (!isBinary && buf.byteLength > MAX_TEXT_GLTF_BYTES) {
-    throw new Error(
-      `This .gltf file is ${sizeMB} MB — too large for browser parsing (the JSON decode would exceed V8's ~512 MB string limit). ` +
-      `Re-export as glTF-Binary (.glb) to drop the base64 bloat, and decimate your mesh in your CAD tool (Blender: Decimate modifier, target <200k triangles). ` +
-      `A typical FTC robot glTF is 5–50 MB.`
-    );
-  }
-  if (isBinary && buf.byteLength > MAX_GLB_BYTES) {
-    throw new Error(
-      `This .glb is ${sizeMB} MB — too large to parse in-browser without crashing. ` +
-      `Decimate your mesh (Blender: Decimate modifier, target <200k triangles) and re-export.`
-    );
-  }
 
-  let data: ArrayBuffer | string = buf;
-  if (!isBinary) {
-    // Text glTF — decode ourselves so BOM / encoding issues surface here,
-    // not inside GLTFLoader's opaque decode path.
-    const text = new TextDecoder('utf-8').decode(buf).replace(/^﻿/, '');
+  let data: ArrayBuffer;
+  if (isBinary) {
+    // Already GLB — skip conversion
+    if (buf.byteLength > MAX_GLB_BYTES) {
+      throw new Error(
+        `This .glb is ${sizeMB} MB — too large to parse in-browser without crashing. ` +
+        `Decimate your mesh (Blender: Decimate modifier, target <200k triangles) and re-export.`
+      );
+    }
+    data = buf;
+  } else {
+    // Text glTF — convert to GLB entirely via ArrayBuffer (no string decoding)
+    // to bypass V8's ~512 MB string limit on large Onshape exports.
+    console.log(`[RobotModel] Converting text .gltf (${sizeMB} MB) to GLB in-browser...`);
     try {
-      JSON.parse(text);
-    } catch (je: any) {
-      const sizeKB = (buf.byteLength / 1024).toFixed(1);
-      const tail = text.slice(-120).replace(/\s+/g, ' ');
-      const last = new Uint8Array(buf, Math.max(0, buf.byteLength - 8));
-      const lastHex = Array.from(last).map(b => b.toString(16).padStart(2, '0')).join(' ');
+      data = gltfToGlb(buf);
+    } catch (e: any) {
       throw new Error(
-        `glTF JSON is malformed: ${je?.message ?? je}. ` +
-        `File size: ${sizeKB} KB. Last bytes (hex): ${lastHex}. Last chars: "${tail}". ` +
-        `The file looks truncated or corrupted during export. Re-export as glTF-Binary (.glb).`
+        `Failed to convert .gltf to GLB: ${e?.message ?? e}. ` +
+        `The file may be malformed or reference external files. Try re-exporting from your CAD tool.`
       );
     }
-    if (/"uri"\s*:\s*"(?!data:)/.test(text)) {
+    const glbMB = (data.byteLength / (1024 * 1024)).toFixed(1);
+    console.log(`[RobotModel] Converted to GLB: ${glbMB} MB`);
+    if (data.byteLength > MAX_GLB_BYTES) {
       throw new Error(
-        'This .gltf references external files (.bin / textures) by URL. A single-file upload can\'t resolve those. ' +
-        'Re-export as glTF-Binary (.glb) — a single self-contained file.'
+        `Converted GLB is ${glbMB} MB — too large. ` +
+        `Decimate your mesh in your CAD tool and re-export.`
       );
     }
-    data = text;
   }
 
   let gltf;
   try {
     gltf = await loader.parseAsync(data, '');
   } catch (e: any) {
-    // Diagnose what the file actually is so the user knows what to export.
     const head4 = new Uint8Array(buf, 0, Math.min(4, buf.byteLength));
     const hex = Array.from(head4).map(b => b.toString(16).padStart(2, '0')).join(' ');
     const ascii = Array.from(head4).map(b => (b >= 32 && b < 127) ? String.fromCharCode(b) : '.').join('');
@@ -92,20 +83,9 @@ export async function parseGLBFile(file: File): Promise<UploadedRobotModel> {
     else if (ascii.startsWith('ISO-')) guess = 'STEP (not supported in-browser)';
     else if (ascii.startsWith('PK')) guess = 'ZIP archive (maybe SolidWorks Pack&Go — unzip it first)';
     else if (head4[0] === 0x00 || head4[0] === 0x80) guess = 'STL (binary)';
-    const msg = e?.message ?? String(e);
-
-    // If it looks like text glTF that references external .bin/textures,
-    // say so explicitly — that's the #1 gotcha.
-    try {
-      const text = new TextDecoder('utf-8').decode(buf);
-      if (/"uri"\s*:/.test(text)) {
-        throw new Error('This glTF references external files (.bin / textures). Re-export as glTF-Binary (.glb) — a single self-contained file.');
-      }
-    } catch { /* pass through to generic error */ }
-
     throw new Error(
       `Could not parse "${file.name}" as glTF/GLB. First bytes: ${hex} ("${ascii}"). ` +
-      `Looks like: ${guess}. Parser said: ${msg}. Re-export as glTF-Binary (.glb).`
+      `Looks like: ${guess}. Parser said: ${e?.message ?? e}. Re-export as glTF-Binary (.glb).`
     );
   }
   const scene = gltf.scene as THREE.Group;
@@ -128,6 +108,300 @@ export async function parseGLBFile(file: File): Promise<UploadedRobotModel> {
 }
 
 /**
+ * Convert a text .gltf (with embedded base64 data URIs) to a binary .glb ArrayBuffer.
+ *
+ * Works entirely on the raw Uint8Array — never decodes the full file to a JS string,
+ * so it bypasses V8's ~512 MB string limit. The strategy:
+ *   1. Scan the byte array for data-URI patterns (`"data:…;base64,…"`)
+ *   2. Decode each base64 segment directly from bytes into binary chunks
+ *   3. Replace each data URI with a short placeholder in-place
+ *   4. The resulting (much smaller) byte array can safely be decoded as a string,
+ *      parsed as JSON, patched with bufferView references, and packed into GLB.
+ */
+function gltfToGlb(buf: ArrayBuffer): ArrayBuffer {
+  const src = new Uint8Array(buf);
+
+  // Base64 lookup table (ASCII byte → 6-bit value)
+  const B64 = new Uint8Array(128);
+  const B64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  for (let i = 0; i < B64_CHARS.length; i++) B64[B64_CHARS.charCodeAt(i)] = i;
+
+  // --- Pass 1: scan for data URIs, extract binary, build a stripped copy ---
+  // We look for the byte pattern:  "data:   (0x22 0x64 0x61 0x74 0x61 0x3A)
+  const MARKER = [0x22, 0x64, 0x61, 0x74, 0x61, 0x3A]; // "data:
+  const COMMA = 0x2C; // ,
+  const QUOTE = 0x22; // "
+  const EQUALS = 0x3D; // =
+
+  interface ExtractedBlob {
+    binary: Uint8Array;
+    mime: string;
+  }
+
+  const blobs: ExtractedBlob[] = [];
+  // We'll build the stripped JSON as segments of the original bytes with
+  // data-URI regions replaced by a placeholder like "data:__BLOB_0__"
+  const segments: Uint8Array[] = [];
+  let lastCopyPos = 0;
+
+  for (let i = 0; i < src.length - MARKER.length; i++) {
+    // Quick first-byte check before full match
+    if (src[i] !== QUOTE || src[i + 1] !== 0x64) continue;
+
+    let match = true;
+    for (let m = 0; m < MARKER.length; m++) {
+      if (src[i + m] !== MARKER[m]) { match = false; break; }
+    }
+    if (!match) continue;
+
+    // Found "data: — find the comma after ;base64,
+    let commaPos = -1;
+    for (let j = i + MARKER.length; j < src.length && j < i + 200; j++) {
+      if (src[j] === COMMA) { commaPos = j; break; }
+    }
+    if (commaPos === -1) continue;
+
+    // Extract MIME type from bytes between "data: and ;base64,"
+    // Pattern: data:<mime>;base64,
+    const mimeStart = i + 1 + 5; // after "data:
+    let mimeEnd = commaPos;
+    // Walk back to find ";base64"
+    for (let j = commaPos - 1; j > mimeStart; j--) {
+      if (src[j] === 0x3B) { mimeEnd = j; break; } // ;
+    }
+    const mimeBytes = src.slice(mimeStart, mimeEnd);
+    const mime = String.fromCharCode(...mimeBytes);
+
+    // Find the closing quote — this is the end of the base64 data
+    const b64Start = commaPos + 1;
+    let b64End = -1;
+    for (let j = b64Start; j < src.length; j++) {
+      if (src[j] === QUOTE) { b64End = j; break; }
+    }
+    if (b64End === -1) continue;
+
+    // Decode base64 directly from bytes
+    const b64Len = b64End - b64Start;
+    let padding = 0;
+    if (b64Len > 0 && src[b64End - 1] === EQUALS) padding++;
+    if (b64Len > 1 && src[b64End - 2] === EQUALS) padding++;
+    const binLen = (b64Len * 3) / 4 - padding;
+    const binary = new Uint8Array(binLen);
+
+    let w = 0;
+    for (let j = b64Start; j < b64End; j += 4) {
+      const a = B64[src[j]];
+      const b = B64[src[j + 1]];
+      const c = B64[src[j + 2]];
+      const d = B64[src[j + 3]];
+      binary[w++] = (a << 2) | (b >> 4);
+      if (w < binLen) binary[w++] = ((b & 0xf) << 4) | (c >> 2);
+      if (w < binLen) binary[w++] = ((c & 0x3) << 6) | d;
+    }
+
+    const blobIdx = blobs.length;
+    blobs.push({ binary, mime });
+
+    // Copy everything before this data URI, then insert placeholder
+    segments.push(src.slice(lastCopyPos, i));
+    const placeholder = new TextEncoder().encode(`"data:__BLOB_${blobIdx}__"`);
+    segments.push(placeholder);
+    lastCopyPos = b64End + 1; // skip past closing quote
+
+    // Skip past this region so we don't re-match
+    i = b64End;
+  }
+
+  // Copy remaining bytes
+  segments.push(src.slice(lastCopyPos));
+
+  // Combine segments into a single (much smaller) byte array
+  const totalStripped = segments.reduce((s, seg) => s + seg.byteLength, 0);
+  console.log(`[gltfToGlb] Stripped ${blobs.length} data URIs, JSON reduced to ${(totalStripped / 1e6).toFixed(1)} MB`);
+  const stripped = new Uint8Array(totalStripped);
+  let pos = 0;
+  for (const seg of segments) {
+    stripped.set(seg, pos);
+    pos += seg.byteLength;
+  }
+
+  // Now safe to decode as string — it's tiny without the base64 blobs
+  const jsonText = new TextDecoder('utf-8').decode(stripped);
+  const gltf = JSON.parse(jsonText);
+
+  // --- Pass 2: build combined BIN chunk and patch JSON references ---
+  const binaryChunks: Uint8Array[] = [];
+  let binOffset = 0;
+
+  // Process buffers
+  const bufferOffsets: number[] = [];
+  for (const buffer of gltf.buffers ?? []) {
+    const uri: string = buffer.uri ?? '';
+    const blobMatch = uri.match(/^data:__BLOB_(\d+)__$/);
+    if (blobMatch) {
+      const blob = blobs[parseInt(blobMatch[1])];
+      bufferOffsets.push(binOffset);
+      binaryChunks.push(blob.binary);
+      buffer.byteLength = blob.binary.byteLength;
+      delete buffer.uri;
+      binOffset += blob.binary.byteLength;
+      const pad = (4 - (blob.binary.byteLength % 4)) % 4;
+      if (pad > 0) { binaryChunks.push(new Uint8Array(pad)); binOffset += pad; }
+    } else {
+      bufferOffsets.push(binOffset);
+    }
+  }
+
+  // Merge multiple buffers into one
+  if (gltf.buffers && gltf.buffers.length > 1) {
+    for (const bv of gltf.bufferViews ?? []) {
+      const idx = bv.buffer ?? 0;
+      bv.byteOffset = (bv.byteOffset ?? 0) + bufferOffsets[idx];
+      bv.buffer = 0;
+    }
+    gltf.buffers = [{ byteLength: binOffset }];
+  } else if (gltf.buffers?.length === 1) {
+    gltf.buffers[0].byteLength = binOffset;
+  }
+
+  // Process images with data URI placeholders
+  for (const img of gltf.images ?? []) {
+    const uri: string = img.uri ?? '';
+    const blobMatch = uri.match(/^data:__BLOB_(\d+)__$/);
+    if (blobMatch) {
+      const blob = blobs[parseInt(blobMatch[1])];
+      const bvOffset = binOffset;
+      binaryChunks.push(blob.binary);
+      binOffset += blob.binary.byteLength;
+      const pad = (4 - (blob.binary.byteLength % 4)) % 4;
+      if (pad > 0) { binaryChunks.push(new Uint8Array(pad)); binOffset += pad; }
+
+      const bvIndex = (gltf.bufferViews ?? []).length;
+      gltf.bufferViews = gltf.bufferViews ?? [];
+      gltf.bufferViews.push({ buffer: 0, byteOffset: bvOffset, byteLength: blob.binary.byteLength });
+      delete img.uri;
+      img.bufferView = bvIndex;
+      img.mimeType = blob.mime;
+    }
+  }
+
+  if (gltf.buffers?.length > 0) gltf.buffers[0].byteLength = binOffset;
+
+  // Build combined BIN
+  const combinedBin = new Uint8Array(binOffset);
+  let wp = 0;
+  for (const chunk of binaryChunks) { combinedBin.set(chunk, wp); wp += chunk.byteLength; }
+
+  // Serialize JSON chunk
+  const jsonBytes = new TextEncoder().encode(JSON.stringify(gltf));
+  const jsonPad = (4 - (jsonBytes.byteLength % 4)) % 4;
+  const jsonChunkLen = jsonBytes.byteLength + jsonPad;
+
+  // Assemble GLB
+  const totalLen = 12 + 8 + jsonChunkLen + 8 + combinedBin.byteLength;
+  const glb = new ArrayBuffer(totalLen);
+  const view = new DataView(glb);
+  const out = new Uint8Array(glb);
+
+  view.setUint32(0, 0x46546C67, true);   // glTF magic
+  view.setUint32(4, 2, true);             // version 2
+  view.setUint32(8, totalLen, true);
+
+  view.setUint32(12, jsonChunkLen, true);
+  view.setUint32(16, 0x4E4F534A, true);   // JSON
+  out.set(jsonBytes, 20);
+  for (let i = 0; i < jsonPad; i++) out[20 + jsonBytes.byteLength + i] = 0x20;
+
+  const binStart = 20 + jsonChunkLen;
+  view.setUint32(binStart, combinedBin.byteLength, true);
+  view.setUint32(binStart + 4, 0x004E4942, true); // BIN
+  out.set(combinedBin, binStart + 8);
+
+  return glb;
+}
+
+/**
+ * Flatten the entire scene graph into ONE mesh to minimize draw calls.
+ * Strips all attributes except position + normal, then merges everything.
+ * Materials are grouped so each unique material = 1 draw call.
+ */
+function flattenToSingleMesh(root: THREE.Group): void {
+  root.updateMatrixWorld(true);
+  const rootInv = new THREE.Matrix4().copy(root.matrixWorld).invert();
+
+  const meshes: THREE.Mesh[] = [];
+  root.traverse((o: any) => {
+    if ((o as THREE.Mesh).isMesh) meshes.push(o as THREE.Mesh);
+  });
+  if (meshes.length <= 1) return;
+
+  // Collect geometries, keeping only position + normal for compatibility
+  const geoms: THREE.BufferGeometry[] = [];
+  const materials: THREE.Material[] = [];
+  for (const m of meshes) {
+    const src = m.geometry as THREE.BufferGeometry;
+    const pos = src.getAttribute('position');
+    if (!pos) continue;
+
+    const g = new THREE.BufferGeometry();
+    const toRoot = new THREE.Matrix4().multiplyMatrices(rootInv, m.matrixWorld);
+
+    // Clone & bake position
+    const posClone = pos.clone();
+    g.setAttribute('position', posClone);
+
+    // Clone & bake normal if available
+    const norm = src.getAttribute('normal');
+    if (norm) {
+      g.setAttribute('normal', norm.clone());
+    } else {
+      g.computeVertexNormals();
+    }
+
+    // Copy index
+    if (src.index) g.setIndex(src.index.clone());
+
+    g.applyMatrix4(toRoot);
+
+    // If determinant is negative (mirrored part), flip winding to fix backface
+    if (toRoot.determinant() < 0 && g.index) {
+      const idx = g.index.array as Uint32Array | Uint16Array;
+      for (let i = 0; i < idx.length; i += 3) {
+        const tmp = idx[i];
+        idx[i] = idx[i + 2];
+        idx[i + 2] = tmp;
+      }
+    }
+
+    geoms.push(g);
+    materials.push((Array.isArray(m.material) ? m.material[0] : m.material) as THREE.Material);
+  }
+
+  if (geoms.length === 0) return;
+
+  try {
+    const merged = BufferGeometryUtils.mergeGeometries(geoms, false);
+    if (!merged) return;
+
+    // Use the first material — good enough for a sim
+    const mat = materials[0] ?? new THREE.MeshStandardMaterial({ color: 0x888888 });
+    const mergedMesh = new THREE.Mesh(merged, mat);
+
+    // Remove all original meshes
+    for (const m of meshes) {
+      m.removeFromParent();
+      m.geometry.dispose();
+    }
+
+    root.add(mergedMesh);
+    console.log(`[RobotModel] Flattened ${meshes.length} meshes → 1 draw call`);
+  } catch (e) {
+    console.warn('[RobotModel] Flatten failed, keeping original meshes:', e);
+    for (const g of geoms) g.dispose();
+  }
+}
+
+/**
  * Apply the orientation + scale transforms to a fresh group containing a clone
  * of the model. Returns the transformed group (caller adds to scene).
  */
@@ -145,6 +419,10 @@ export function buildTransformedGroup(model: UploadedRobotModel): THREE.Group {
   box.getCenter(c);
   inner.position.set(-c.x, -box.min.y, -c.z);
 
+  // Flatten all meshes into one to minimize draw calls.
+  // Safe since `inner` is a clone — original scene untouched.
+  flattenToSingleMesh(inner);
+
   inner.traverse((o: any) => {
     if ((o as THREE.Mesh).isMesh) {
       (o as THREE.Mesh).castShadow = true;
@@ -161,43 +439,40 @@ export interface HullShape {
 }
 
 /**
- * Build one convex hull per mesh node in the model. Falls back to a single
- * combined hull if the model contains only one mesh. Returns shapes in the
- * transformed group's local space, with offsets relative to that space origin.
+ * Build a single convex hull from ALL mesh vertices in the model.
+ * Previous per-mesh approach froze the browser on CAD exports with hundreds of meshes.
  */
 export function buildHulls(transformed: THREE.Group): HullShape[] {
-  const meshes: THREE.Mesh[] = [];
   transformed.updateMatrixWorld(true);
-  transformed.traverse((o: any) => {
-    if ((o as THREE.Mesh).isMesh) meshes.push(o as THREE.Mesh);
-  });
 
   const root = transformed;
   const rootInv = new THREE.Matrix4().copy(root.matrixWorld).invert();
 
-  const out: HullShape[] = [];
-  for (const m of meshes) {
+  // Collect ALL vertices from every mesh into one list
+  const allPts: THREE.Vector3[] = [];
+  const v = new THREE.Vector3();
+  transformed.traverse((o: any) => {
+    if (!(o as THREE.Mesh).isMesh) return;
+    const m = o as THREE.Mesh;
     const geom = m.geometry as THREE.BufferGeometry;
     const posAttr = geom.getAttribute('position');
-    if (!posAttr) continue;
+    if (!posAttr) return;
 
     const toLocal = new THREE.Matrix4().multiplyMatrices(rootInv, m.matrixWorld);
-    const pts: THREE.Vector3[] = [];
-    const v = new THREE.Vector3();
-    for (let i = 0; i < posAttr.count; i++) {
+    // Sample up to 50 verts per mesh to keep total manageable
+    const stride = Math.max(1, Math.floor(posAttr.count / 50));
+    for (let i = 0; i < posAttr.count; i += stride) {
       v.fromBufferAttribute(posAttr, i).applyMatrix4(toLocal);
-      pts.push(v.clone());
+      allPts.push(v.clone());
     }
-    if (pts.length < 4) continue;
+  });
 
-    const sampled = downsamplePoints(pts, 400);
-    const hullShape = hullFromPoints(sampled);
-    if (!hullShape) continue;
-    out.push(hullShape);
-  }
+  if (allPts.length < 4) return [];
 
-  if (out.length === 0) return [];
-  return out;
+  // Downsample to 500 points max, then build one hull
+  const sampled = downsamplePoints(allPts, 500);
+  const hull = hullFromPoints(sampled);
+  return hull ? [hull] : [];
 }
 
 function downsamplePoints(pts: THREE.Vector3[], maxN: number): THREE.Vector3[] {

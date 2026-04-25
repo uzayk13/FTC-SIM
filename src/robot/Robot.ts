@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { InputManager } from '../input/InputManager';
-import type { UploadedRobotModel } from './RobotModel';
-import { buildTransformedGroup, buildHulls } from './RobotModel';
 
 // Chassis dimensions (meters)
 const FRAME_W = 0.440;
@@ -72,21 +72,18 @@ export class Robot {
   private wheels: THREE.Group[] = [];
   private wheelSpeed = 0;
 
-  // State — Y offset of 0.025 accounts for tile surface above physics origin
-  initialPos = new THREE.Vector3(0.6096, CHASSIS_Y + 0.025, -1.6028);
+  // Start on opposite side of field, facing +Z (toward audience)
+  initialPos = new THREE.Vector3(-0.6096, 0.25, 1.6028);
   speed = 0;
   turnRate = 0;
   boosting = false;
-  uploadedModel: UploadedRobotModel | null;
-
   telemetry: Record<string, string | number> = {};
 
   envMap: THREE.Texture | null;
 
-  constructor(scene: THREE.Scene, world: CANNON.World, uploadedModel: UploadedRobotModel | null = null, envMap: THREE.Texture | null = null) {
+  constructor(scene: THREE.Scene, world: CANNON.World, envMap: THREE.Texture | null = null) {
     this.scene = scene;
     this.world = world;
-    this.uploadedModel = uploadedModel;
     this.envMap = envMap;
     this.build();
   }
@@ -97,31 +94,6 @@ export class Robot {
     this.shooterMesh = new THREE.Group();
     this.slideMesh = new THREE.Group();
 
-    let useUploadedHulls = false;
-
-    if (this.uploadedModel) {
-      this.chassisMesh.add(this.intakeMesh);
-      this.chassisMesh.add(this.shooterMesh);
-      this.chassisMesh.add(this.slideMesh);
-      const group = buildTransformedGroup(this.uploadedModel);
-      this.chassisMesh.add(group);
-      useUploadedHulls = true;
-      // Stash for physics body construction below.
-      (this as any)._uploadedGroup = group;
-    } else {
-      this.buildFrame();
-      this.buildWheels();
-      this.buildMotors();
-      this.buildElectronics();
-      this.buildIntake();
-      this.buildLinearSlide();
-      this.buildShooterArm();
-
-      const light = new THREE.PointLight(0xff6600, 0.3, 0.8);
-      light.position.set(0, TOTAL_HEIGHT * 0.6, 0);
-      this.chassisMesh.add(light);
-    }
-
     this.chassisMesh.position.copy(this.initialPos);
     this.scene.add(this.chassisMesh);
 
@@ -131,37 +103,68 @@ export class Robot {
       angularDamping: 0.95,
     });
 
-    if (useUploadedHulls) {
-      const group: THREE.Group = (this as any)._uploadedGroup;
-      const hulls = buildHulls(group);
-      if (hulls.length > 0) {
-        for (const h of hulls) {
-          this.chassisBody.addShape(h.shape, h.offset);
-        }
-      } else {
-        // Fallback: use a bbox-sized box if hull build failed.
-        const bbox = new THREE.Box3().setFromObject(group);
-        const size = new THREE.Vector3();
-        bbox.getSize(size);
-        const hx = Math.max(0.05, size.x / 2);
-        const hy = Math.max(0.05, size.y / 2);
-        const hz = Math.max(0.05, size.z / 2);
-        this.chassisBody.addShape(new CANNON.Box(new CANNON.Vec3(hx, hy, hz)));
-      }
-    } else {
-      // Default chassis: compound of spheres (legacy collider).
-      const halfW = FRAME_W / 2;
-      const halfD = FRAME_D / 2;
-      const SR = 0.04;
-      for (const [sx, sz] of [[-halfW+SR, -halfD+SR], [halfW-SR, -halfD+SR], [-halfW+SR, halfD-SR], [halfW-SR, halfD-SR], [0, 0]]) {
-        this.chassisBody.addShape(new CANNON.Sphere(SR), new CANNON.Vec3(sx, 0, sz));
-      }
-    }
+    // Box collider matching default chassis dimensions
+    this.chassisBody.addShape(
+      new CANNON.Box(new CANNON.Vec3(FRAME_W / 2, 0.05, FRAME_D / 2))
+    );
 
     this.chassisBody.position.set(this.initialPos.x, this.initialPos.y, this.initialPos.z);
-    this.chassisBody.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), Math.PI);
-    this.chassisMesh.rotation.y = Math.PI;
+    this.chassisBody.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), 0);
+    this.chassisMesh.rotation.y = 0;
     this.world.addBody(this.chassisBody);
+
+    // Load GLB model
+    this.loadRobotModel();
+  }
+
+  private async loadRobotModel() {
+    try {
+      const loader = new GLTFLoader();
+      const draco = new DRACOLoader();
+      draco.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
+      loader.setDRACOLoader(draco);
+
+      const gltf = await loader.loadAsync('/models/Robotbasic.glb');
+      const model = gltf.scene;
+
+      // Auto-fit: scale so max horizontal dimension = FRAME_W
+      const bbox = new THREE.Box3().setFromObject(model);
+      const size = new THREE.Vector3();
+      bbox.getSize(size);
+      const maxH = Math.max(size.x, size.z) || size.y || 1;
+      const scale = FRAME_W / maxH;
+      model.scale.setScalar(scale);
+
+      // Rotate model so its visual front aligns with physics forward (-Z)
+      model.rotation.y = Math.PI / 2;
+
+      // Center model on the physics body origin (center of box collider)
+      const scaledBox = new THREE.Box3().setFromObject(model);
+      const center = new THREE.Vector3();
+      scaledBox.getCenter(center);
+      model.position.set(-center.x, -center.y, -center.z);
+
+      // Skip per-mesh shadow casting — too many draw calls for shadow map
+      model.traverse((o: any) => {
+        if ((o as THREE.Mesh).isMesh) {
+          (o as THREE.Mesh).castShadow = false;
+          (o as THREE.Mesh).receiveShadow = false;
+        }
+      });
+
+      this.chassisMesh.add(model);
+      console.log(`[Robot] Loaded Robotbasic.glb (${(size.x / scale).toFixed(0)}×${(size.y / scale).toFixed(0)}×${(size.z / scale).toFixed(0)} mm, scale=${scale.toFixed(4)})`);
+    } catch (e) {
+      console.warn('[Robot] Failed to load Robotbasic.glb, building fallback chassis:', e);
+      this.buildFallbackChassis();
+    }
+  }
+
+  private buildFallbackChassis() {
+    const mat = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.5, metalness: 0.5 });
+    const box = new THREE.Mesh(new THREE.BoxGeometry(FRAME_W, 0.1, FRAME_D), mat);
+    box.castShadow = true;
+    this.chassisMesh.add(box);
   }
 
   // ─── FRAME: goBILDA U-Channel rails ───
@@ -659,27 +662,6 @@ export class Robot {
     this.chassisMesh.position.copy(this.chassisBody.position as unknown as THREE.Vector3);
     this.chassisMesh.quaternion.copy(this.chassisBody.quaternion as unknown as THREE.Quaternion);
 
-    // Animate wheels (basic mode only)
-    if (!this.uploadedModel) {
-      const vel = this.chassisBody.velocity;
-      const speed = Math.sqrt(vel.x ** 2 + vel.z ** 2);
-      this.wheelSpeed = speed / WHEEL_R;
-      const movingForward = vel.z <= 0; // -Z is forward
-      for (const wheel of this.wheels) {
-        const hub = wheel.children[0];
-        if (hub) {
-          hub.rotation.x += this.wheelSpeed * dt * (movingForward ? 1 : -1);
-        }
-      }
-
-      // Animate intake rollers
-      if (this.intakeDirection !== 'off') {
-        const dir = this.intakeDirection === 'in' ? 1 : -1;
-        for (const roller of this.intakeRollers) {
-          roller.rotation.x += dir * 15 * dt;
-        }
-      }
-    }
 
     this.shooterMesh.rotation.y = this.shooterYaw;
     this.shooterMesh.rotation.x = -this.shooterAngle * 0.5;
@@ -813,9 +795,9 @@ export class Robot {
     this.chassisBody.position.set(this.initialPos.x, this.initialPos.y, this.initialPos.z);
     this.chassisBody.velocity.setZero();
     this.chassisBody.angularVelocity.setZero();
-    this.chassisBody.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), Math.PI);
+    this.chassisBody.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), 0);
     this.chassisMesh.position.copy(this.initialPos);
-    this.chassisMesh.rotation.set(0, Math.PI, 0);
+    this.chassisMesh.rotation.set(0, 0, 0);
     this.shooterAngle = 0.4;
     this.shooterYaw = 0;
 

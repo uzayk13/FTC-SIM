@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
@@ -423,8 +424,11 @@ export class Field {
   // ─── GOALS (blue/red ramp assemblies — standalone exports) ───
   private loadGoalGLTF(side: 'blue' | 'red') {
     const loader = new GLTFLoader();
+    const draco = new DRACOLoader();
+    draco.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
+    loader.setDRACOLoader(draco);
     loader.load(
-      `/models/${side}-goal.gltf`,
+      `/models/${side}-goal.glb`,
       (gltf) => {
         const raw = gltf.scene;
 

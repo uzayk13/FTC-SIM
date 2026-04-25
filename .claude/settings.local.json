@@ -3,7 +3,14 @@
     "allow": [
       "WebSearch",
       "Bash(cd /c/Users/PC/OneDrive/Desktop/FTC-SIMMER/FTC-SIMMER/backend && ./gradlew build --stacktrace 2>&1 | tail -30)",
-      "Bash(./gradlew build:*)"
+      "Bash(./gradlew build:*)",
+      "Bash(cd \"C:/Users/PC/OneDrive/Desktop/FTC-SIMMER/FTC-SIM\" && npm run dev)",
+      "Bash(cd \"C:/Users/PC/OneDrive/Desktop/FTC-SIMMER/FTC-SIM/backend\" && JAVA_HOME=\"C:/Program Files/Microsoft/jdk-21.0.10.7-hotspot\" ./gradlew bootRun)",
+      "Read(//c/Program Files/**)",
+      "Read(//c/Program Files/Java//**)",
+      "Bash(where java:*)",
+      "Bash(java -version)",
+      "Bash(cd \"C:/Users/PC/OneDrive/Desktop/FTC-SIMMER/FTC-SIM/backend\" && JAVA_HOME=\"C:/Program Files/Eclipse Adoptium/jdk-25.0.2.10-hotspot\" ./gradlew bootRun)"
     ]
   }
 }

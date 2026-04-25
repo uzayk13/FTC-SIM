@@ -33,7 +33,7 @@ export class Engine {
 
   private _animFrameId = 0;
 
-  constructor(canvas: HTMLCanvasElement, robotModel: import('../robot/RobotModel').UploadedRobotModel | null = null, keymap?: import('../input/Keymap').Keymap) {
+  constructor(canvas: HTMLCanvasElement, keymap?: import('../input/Keymap').Keymap) {
     // Renderer — standard forward rendering
     this.renderer = new THREE.WebGLRenderer({
       canvas,
@@ -72,7 +72,7 @@ export class Engine {
     // Initialize subsystems
     this.input = new InputManager(keymap);
     this.field = new Field(this.scene, this.world, this.envMap);
-    this.robot = new Robot(this.scene, this.world, robotModel, this.envMap);
+    this.robot = new Robot(this.scene, this.world, this.envMap);
     this.cameraController = new CameraController(this.camera, this.renderer.domElement, this.robot);
     this.codeRunner = new CodeRunner(this);
 
